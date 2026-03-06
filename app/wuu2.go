@@ -21,7 +21,23 @@ type Wow struct {
 	Facing    float32
 }
 
+type AppleMusic struct {
+	LastChange string
+	Song       string
+	Artist     string
+	Album      string
+}
+
+type Spotify struct {
+	LastChange string
+	Song       string
+	Artist     string
+	Album      string
+}
+
 type Wuu2 struct {
-	Trakt []Trakt
-	Wow   []Wow
+	Trakt      []Trakt
+	Wow        []Wow
+	AppleMusic []AppleMusic
+	Spotify    []Spotify
 }
