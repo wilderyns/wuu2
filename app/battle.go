@@ -33,6 +33,7 @@ type battleNetProtectedCharacterSummary struct {
 		Name  string `json:"name"`
 		Realm struct {
 			Name string `json:"name"`
+			Slug string `json:"slug"`
 		} `json:"realm"`
 	} `json:"character"`
 	Position struct {
@@ -47,6 +48,15 @@ type battleNetProtectedCharacterSummary struct {
 		Z      float32 `json:"z"`
 		Facing float32 `json:"facing"`
 	} `json:"position"`
+}
+
+type battleNetCharacterMediaAsset struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type battleNetCharacterMedia struct {
+	Assets []battleNetCharacterMediaAsset `json:"assets"`
 }
 
 type battleNetAuthState struct {
@@ -236,7 +246,8 @@ func getBattle(config Config, wuu2 *Wuu2) {
 	summary, err := fetchBattleNetProtectedCharacter(config, accessToken)
 	if errors.Is(err, errBattleNetUnauthorized) {
 		battleAuth.clearAccessToken()
-		accessToken, refreshErr := battleAuth.ensureAccessToken(config)
+		var refreshErr error
+		accessToken, refreshErr = battleAuth.ensureAccessToken(config)
 		if refreshErr != nil {
 			fmt.Println("Battle.net token refresh after 401 failed:", refreshErr)
 			return
@@ -247,6 +258,21 @@ func getBattle(config Config, wuu2 *Wuu2) {
 	if err != nil {
 		fmt.Println("Battle.net protected character request failed:", err)
 		return
+	}
+
+	media, mediaErr := fetchBattleNetCharacterMedia(config, accessToken, summary)
+	if errors.Is(mediaErr, errBattleNetUnauthorized) {
+		battleAuth.clearAccessToken()
+		var refreshErr error
+		accessToken, refreshErr = battleAuth.ensureAccessToken(config)
+		if refreshErr != nil {
+			fmt.Println("Battle.net token refresh after 401 failed on character-media:", refreshErr)
+		} else {
+			media, mediaErr = fetchBattleNetCharacterMedia(config, accessToken, summary)
+		}
+	}
+	if mediaErr != nil {
+		fmt.Println("Battle.net character media request failed:", mediaErr)
 	}
 
 	now := time.Now().UTC()
@@ -260,6 +286,9 @@ func getBattle(config Config, wuu2 *Wuu2) {
 		Z:         summary.Position.Z,
 		Facing:    summary.Position.Facing,
 	}
+	entry.AvatarURL = battleNetAssetValue(media.Assets, "avatar")
+	entry.InsetURL = battleNetAssetValue(media.Assets, "inset")
+	entry.MainrawURL = battleNetAssetValue(media.Assets, "main-raw")
 	entry.Online = hasWowCharacterMoved(wowMovementHistory, entry, now, config.UpdateIntervalMinutes)
 
 	wowMovementHistory = append(wowMovementHistory, entry)
@@ -319,6 +348,78 @@ func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battle
 	}
 
 	return summary, nil
+}
+
+func fetchBattleNetCharacterMedia(config Config, accessToken string, summary battleNetProtectedCharacterSummary) (battleNetCharacterMedia, error) {
+	var media battleNetCharacterMedia
+
+	realmSlug := strings.TrimSpace(summary.Character.Realm.Slug)
+	if realmSlug == "" {
+		return media, errors.New("missing realm slug in protected character response")
+	}
+
+	characterName := strings.ToLower(nonEmpty(summary.Character.Name, config.BattleNetCharacter))
+	characterName = strings.TrimSpace(characterName)
+	if characterName == "" {
+		return media, errors.New("missing character name for character-media request")
+	}
+
+	baseURI := strings.TrimRight(config.BattleNetRequestURI, "/")
+	requestURI := fmt.Sprintf(
+		"%s/profile/wow/character/%s/%s/character-media",
+		baseURI,
+		url.PathEscape(realmSlug),
+		url.PathEscape(characterName),
+	)
+
+	query := url.Values{}
+	query.Set("namespace", fmt.Sprintf("profile-%s", strings.ToLower(config.BattleNetRegion)))
+	if config.BattleNetLocale != "" {
+		query.Set("locale", config.BattleNetLocale)
+	}
+
+	req, err := http.NewRequest("GET", requestURI+"?"+query.Encode(), nil)
+	if err != nil {
+		return media, err
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return media, err
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return media, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return media, errBattleNetUnauthorized
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return media, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	if err := json.Unmarshal(respBody, &media); err != nil {
+		return media, err
+	}
+
+	return media, nil
+}
+
+func battleNetAssetValue(assets []battleNetCharacterMediaAsset, key string) string {
+	for _, asset := range assets {
+		if strings.EqualFold(strings.TrimSpace(asset.Key), key) {
+			return strings.TrimSpace(asset.Value)
+		}
+	}
+	return ""
 }
 
 func buildBattleNetAuthorizeURL(config Config, state string) string {

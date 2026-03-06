@@ -10,29 +10,46 @@ type Trakt struct {
 }
 
 type Wow struct {
-	LastCheck string
-	Online    bool
-	Character string
-	Realm     string
-	Location  string
-	X         float32
-	Y         float32
-	Z         float32
-	Facing    float32
+	LastCheck  string
+	Online     bool
+	Character  string
+	Realm      string
+	Location   string
+	X          float32
+	Y          float32
+	Z          float32
+	Facing     float32
+	AvatarURL  string
+	InsetURL   string
+	MainrawURL string
 }
 
 type AppleMusic struct {
 	LastChange string
 	Song       string
+	SongLink   string
 	Artist     string
+	ArtistLink string
 	Album      string
+	AlbumLink  string
 }
 
 type Spotify struct {
 	LastChange string
 	Song       string
+	SongLink   string
 	Artist     string
+	ArtistLink string
 	Album      string
+	AlbumLink  string
+}
+
+type Steam struct {
+	LastChange  string
+	Game        string
+	GameLink    string
+	AvatarURL   string
+	HoursPlayed int
 }
 
 type Wuu2 struct {
@@ -40,4 +57,5 @@ type Wuu2 struct {
 	Wow        []Wow
 	AppleMusic []AppleMusic
 	Spotify    []Spotify
+	Steam      []Steam
 }
