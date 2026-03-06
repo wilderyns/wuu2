@@ -66,15 +66,23 @@ type battleNetAuthState struct {
 	expiresAt    time.Time
 	authCode     string
 	state        string
+	startEnabled bool
 }
 
-var battleAuth battleNetAuthState
+var battleAuth = battleNetAuthState{
+	startEnabled: true,
+}
 var wowMovementHistory []Wow
 
 func battleNetAuthStartHandler(config Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !hasBattleNetConfig(config) {
 			http.Error(w, "Battle.net config missing", http.StatusBadRequest)
+			return
+		}
+
+		if !battleAuth.isStartEnabled() {
+			http.Error(w, "Battle.net auth start is disabled until re-authentication is required", http.StatusConflict)
 			return
 		}
 
@@ -139,6 +147,18 @@ func (s *battleNetAuthState) clearAccessToken() {
 	s.expiresAt = time.Time{}
 }
 
+func (s *battleNetAuthState) isStartEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startEnabled
+}
+
+func (s *battleNetAuthState) enableStart() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startEnabled = true
+}
+
 func (s *battleNetAuthState) ensureAccessToken(config Config) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,6 +182,7 @@ func (s *battleNetAuthState) ensureAccessToken(config Config) (string, error) {
 	}
 
 	if s.authCode == "" {
+		s.startEnabled = true
 		return "", fmt.Errorf("battlenet auth required: open %s", buildBattleNetAuthorizeURL(config, ""))
 	}
 
@@ -171,6 +192,7 @@ func (s *battleNetAuthState) ensureAccessToken(config Config) (string, error) {
 		"redirect_uri": {config.BattleNetRedirectURI},
 	})
 	if err != nil {
+		s.startEnabled = true
 		return "", err
 	}
 
@@ -190,6 +212,7 @@ func (s *battleNetAuthState) applyToken(token battleNetTokenResponse, now time.T
 	} else {
 		s.expiresAt = now.Add(12 * time.Hour)
 	}
+	s.startEnabled = false
 }
 
 func exchangeBattleNetToken(config Config, values url.Values) (battleNetTokenResponse, error) {
@@ -245,6 +268,7 @@ func getBattle(config Config, wuu2 *Wuu2) {
 
 	summary, err := fetchBattleNetProtectedCharacter(config, accessToken)
 	if errors.Is(err, errBattleNetUnauthorized) {
+		battleAuth.enableStart()
 		battleAuth.clearAccessToken()
 		var refreshErr error
 		accessToken, refreshErr = battleAuth.ensureAccessToken(config)
@@ -262,6 +286,7 @@ func getBattle(config Config, wuu2 *Wuu2) {
 
 	media, mediaErr := fetchBattleNetCharacterMedia(config, accessToken, summary)
 	if errors.Is(mediaErr, errBattleNetUnauthorized) {
+		battleAuth.enableStart()
 		battleAuth.clearAccessToken()
 		var refreshErr error
 		accessToken, refreshErr = battleAuth.ensureAccessToken(config)
@@ -289,7 +314,9 @@ func getBattle(config Config, wuu2 *Wuu2) {
 	entry.AvatarURL = battleNetAssetValue(media.Assets, "avatar")
 	entry.InsetURL = battleNetAssetValue(media.Assets, "inset")
 	entry.MainrawURL = battleNetAssetValue(media.Assets, "main-raw")
+	entry.ArmoryURL = buildWowArmoryURL(config, summary)
 	entry.Online = hasWowCharacterMoved(wowMovementHistory, entry, now, config.UpdateIntervalMinutes)
+	entry.LastOnline = resolveWowLastOnline(wowMovementHistory, entry)
 
 	wowMovementHistory = append(wowMovementHistory, entry)
 	wowMovementHistory = trimWowMovementHistory(wowMovementHistory, 512)
@@ -422,6 +449,47 @@ func battleNetAssetValue(assets []battleNetCharacterMediaAsset, key string) stri
 	return ""
 }
 
+func buildWowArmoryURL(config Config, summary battleNetProtectedCharacterSummary) string {
+	realmSlug := strings.TrimSpace(summary.Character.Realm.Slug)
+	characterName := strings.TrimSpace(summary.Character.Name)
+	if realmSlug == "" || characterName == "" {
+		return ""
+	}
+
+	region := strings.ToLower(strings.TrimSpace(config.BattleNetRegion))
+	if region == "" {
+		region = "eu"
+	}
+
+	locale := normalizeWowArmoryLocale(config.BattleNetLocale, region)
+
+	return fmt.Sprintf(
+		"https://worldofwarcraft.blizzard.com/%s/character/%s/%s/%s/",
+		locale,
+		url.PathEscape(region),
+		url.PathEscape(strings.ToLower(realmSlug)),
+		url.PathEscape(strings.ToLower(characterName)),
+	)
+}
+
+func normalizeWowArmoryLocale(rawLocale string, region string) string {
+	locale := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(rawLocale), "_", "-"))
+	if locale != "" {
+		return locale
+	}
+
+	switch strings.ToLower(strings.TrimSpace(region)) {
+	case "eu":
+		return "en-gb"
+	case "kr":
+		return "ko-kr"
+	case "tw":
+		return "zh-tw"
+	default:
+		return "en-us"
+	}
+}
+
 func buildBattleNetAuthorizeURL(config Config, state string) string {
 	query := url.Values{}
 	query.Set("response_type", "code")
@@ -481,6 +549,29 @@ func hasWowCharacterMoved(history []Wow, current Wow, now time.Time, lookback ti
 func sameWowCharacter(a Wow, b Wow) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Character), strings.TrimSpace(b.Character)) &&
 		strings.EqualFold(strings.TrimSpace(a.Realm), strings.TrimSpace(b.Realm))
+}
+
+func resolveWowLastOnline(history []Wow, current Wow) string {
+	if current.Online {
+		return current.LastCheck
+	}
+
+	for i := len(history) - 1; i >= 0; i-- {
+		existing := history[i]
+		if !sameWowCharacter(existing, current) {
+			continue
+		}
+
+		lastOnline := strings.TrimSpace(existing.LastOnline)
+		if lastOnline != "" {
+			return lastOnline
+		}
+		if existing.Online {
+			return existing.LastCheck
+		}
+	}
+
+	return ""
 }
 
 func formatWowLocation(summary battleNetProtectedCharacterSummary) string {

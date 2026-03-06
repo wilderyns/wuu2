@@ -11,6 +11,7 @@ type Trakt struct {
 
 type Wow struct {
 	LastCheck  string
+	LastOnline string
 	Online     bool
 	Character  string
 	Realm      string
@@ -22,6 +23,7 @@ type Wow struct {
 	AvatarURL  string
 	InsetURL   string
 	MainrawURL string
+	ArmoryURL  string
 }
 
 type AppleMusic struct {
