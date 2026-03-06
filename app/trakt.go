@@ -70,35 +70,40 @@ func getTrakt(config Config, wuu2 *Wuu2) {
 		return
 	}
 
-	for _, item := range history {
-		traktItem := Trakt{
-			WatchedAt: item.WatchedAt,
-			Type:      item.Type,
-		}
-
-		switch item.Type {
-		case "movie":
-			traktItem.Title = item.Movie.Title
-			traktItem.IMDB = item.Movie.IDs.IMDB
-		case "episode":
-			traktItem.Title = item.Show.Title
-			if item.Episode.Season > 0 {
-				traktItem.Season = strconv.Itoa(item.Episode.Season)
-			}
-			if item.Episode.Number > 0 {
-				traktItem.Episode = strconv.Itoa(item.Episode.Number)
-			}
-			if item.Show.IDs.IMDB != "" {
-				traktItem.IMDB = item.Show.IDs.IMDB
-			} else {
-				traktItem.IMDB = item.Episode.IDs.IMDB
-			}
-		default:
-			// Best-effort fallback if Trakt adds or returns other item types.
-			traktItem.Title = item.Movie.Title
-			traktItem.IMDB = item.Movie.IDs.IMDB
-		}
-
-		wuu2.Trakt = append(wuu2.Trakt, traktItem)
+	if len(history) == 0 {
+		wuu2.Trakt = nil
+		return
 	}
+
+	item := history[0]
+	traktItem := Trakt{
+		WatchedAt: item.WatchedAt,
+		Type:      item.Type,
+	}
+
+	switch item.Type {
+	case "movie":
+		traktItem.Title = item.Movie.Title
+		traktItem.IMDB = item.Movie.IDs.IMDB
+	case "episode":
+		traktItem.Title = item.Show.Title
+		if item.Episode.Season > 0 {
+			traktItem.Season = strconv.Itoa(item.Episode.Season)
+		}
+		if item.Episode.Number > 0 {
+			traktItem.Episode = strconv.Itoa(item.Episode.Number)
+		}
+		if item.Show.IDs.IMDB != "" {
+			traktItem.IMDB = item.Show.IDs.IMDB
+		} else {
+			traktItem.IMDB = item.Episode.IDs.IMDB
+		}
+	default:
+		// Best-effort fallback if Trakt adds or returns other item types.
+		traktItem.Title = item.Movie.Title
+		traktItem.IMDB = item.Movie.IDs.IMDB
+	}
+
+	// Public payload should contain only the latest Trakt snapshot.
+	wuu2.Trakt = []Trakt{traktItem}
 }
