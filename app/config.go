@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -11,7 +12,8 @@ import (
 
 type Config struct {
 	UpdateIntervalMinutes time.Duration `env:"UPDATE_INTERVAL_MINUTES,required"`
-	Address               string        `env:"ADDRESS,required"`
+	Address               string        `env:"ADDRESS"`
+	Port                  string        `env:"PORT"`
 
 	TraktEnabled bool   `env:"TRAKT_ENABLED"`
 	TraktID      string `env:"TRAKT_ID"`
@@ -37,6 +39,8 @@ func loadConfig() Config {
 	if err := env.Parse(&conf); err != nil {
 		log.Fatalf("Failed to parse environment variables: %v", err)
 	}
+
+	conf.Address = resolveListenAddress(conf.Address, conf.Port)
 
 	if conf.TraktEnabled && strings.TrimSpace(conf.TraktID) == "" {
 		log.Fatal("TRAKT_ENABLED=true requires TRAKT_ID")
@@ -66,4 +70,29 @@ func loadConfig() Config {
 	}
 
 	return conf
+}
+
+func resolveListenAddress(address string, port string) string {
+	address = strings.TrimSpace(address)
+	port = strings.TrimSpace(port)
+
+	// Cloud Run sets PORT; default to binding all interfaces on that port.
+	if address == "" {
+		if port != "" {
+			return ":" + port
+		}
+		return ":8080"
+	}
+
+	// If an localhost bind is configured, convert to all interfaces so
+	// container platforms (Cloud Run) can reach the process.
+	host, p, err := net.SplitHostPort(address)
+	if err == nil {
+		if host == "localhost" || host == "127.0.0.1" {
+			return ":" + p
+		}
+		return address
+	}
+
+	return address
 }

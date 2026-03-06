@@ -28,10 +28,14 @@ docker run --rm -p 8080:8080 wuu2:latest
 
 ### Required
 
-- `ADDRESS` (example: `localhost:8080`)
 - `UPDATE_INTERVAL_MINUTES` (as a Go duration, example: `30m`)
 - `TRAKT_ENABLED` (`true`/`false`)
 - `BATTLENET_ENABLED` (`true`/`false`)
+
+### HTTP server
+
+- `PORT`
+- `ADDRESS` (optional override, example: `:8080` or `localhost:8080`)
 
 ### Optional
 

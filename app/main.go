@@ -52,7 +52,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Println("No .env file found, using environment variables")
 	}
 
 	var config = loadConfig()
@@ -63,5 +63,6 @@ func main() {
 		http.HandleFunc("/auth/battlenet/callback", battleNetAuthCallbackHandler(config))
 	}
 	go timedUpdater(config)
-	go log.Fatal(http.ListenAndServe(config.Address, nil))
+	log.Printf("Listening on %s", config.Address)
+	log.Fatal(http.ListenAndServe(config.Address, nil))
 }
