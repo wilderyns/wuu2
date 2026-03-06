@@ -36,6 +36,7 @@ docker run --rm -p 8080:8080 wuu2:latest
 
 - `PORT`
 - `ADDRESS` (optional override, example: `:8080` or `localhost:8080`)
+- `CORS_ALLOW_ORIGIN` (optional, default `*`; comma-separated allowlist also supported)
 
 ### Optional
 
@@ -65,6 +66,7 @@ docker run --rm -p 8080:8080 wuu2:latest
 ```env
 ADDRESS="localhost:8080"
 UPDATE_INTERVAL_MINUTES=30m
+CORS_ALLOW_ORIGIN="*"
 
 TRAKT_ENABLED=true
 TRAKT_ID="your-trakt-client-id"

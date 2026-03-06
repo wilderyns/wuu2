@@ -14,6 +14,7 @@ type Config struct {
 	UpdateIntervalMinutes time.Duration `env:"UPDATE_INTERVAL_MINUTES,required"`
 	Address               string        `env:"ADDRESS"`
 	Port                  string        `env:"PORT"`
+	CORSAllowOrigin       string        `env:"CORS_ALLOW_ORIGIN" envDefault:"*"`
 
 	TraktEnabled bool   `env:"TRAKT_ENABLED"`
 	TraktID      string `env:"TRAKT_ID"`
