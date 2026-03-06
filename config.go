@@ -1,0 +1,69 @@
+package main
+
+import (
+	"log"
+	"strings"
+	"time"
+
+	"github.com/caarlos0/env/v6"
+	_ "github.com/joho/godotenv"
+)
+
+type Config struct {
+	UpdateIntervalMinutes time.Duration `env:"UPDATE_INTERVAL_MINUTES,required"`
+	Address               string        `env:"ADDRESS,required"`
+
+	TraktEnabled bool   `env:"TRAKT_ENABLED"`
+	TraktID      string `env:"TRAKT_ID"`
+
+	BattleNetEnabled bool `env:"BATTLENET_ENABLED"`
+
+	AuthSecurityCode string `env:"AUTH_SECURITY_CODE"`
+
+	BattleNetRequestURI   string `env:"BATTLENET_REQUEST_URI"`
+	BattleNetClientID     string `env:"BATTLENET_CLIENT_ID"`
+	BattleNetClientSecret string `env:"BATTLENET_CLIENT_SECRET"`
+	BattleNetRealm        string `env:"BATTLENET_REALM"`
+	BattleNetCharacter    string `env:"BATTLENET_CHARACTER"`
+	BattleNetCharacterID  string `env:"BATTLENET_CHARACTER_ID"`
+	BattleNetLocale       string `env:"BATTLENET_LOCALE"`
+	BattleNetRegion       string `env:"BATTLENET_REGION"`
+	BattleNetRedirectURI  string `env:"BATTLENET_REDIRECT_URI"`
+	BattleNetScope        string `env:"BATTLENET_SCOPE"`
+}
+
+func loadConfig() Config {
+	var conf Config
+	if err := env.Parse(&conf); err != nil {
+		log.Fatalf("Failed to parse environment variables: %v", err)
+	}
+
+	if conf.TraktEnabled && strings.TrimSpace(conf.TraktID) == "" {
+		log.Fatal("TRAKT_ENABLED=true requires TRAKT_ID")
+	}
+
+	if conf.BattleNetEnabled {
+		required := map[string]string{
+			"BATTLENET_REQUEST_URI":   conf.BattleNetRequestURI,
+			"BATTLENET_CLIENT_ID":     conf.BattleNetClientID,
+			"BATTLENET_CLIENT_SECRET": conf.BattleNetClientSecret,
+			"BATTLENET_REALM":         conf.BattleNetRealm,
+			"BATTLENET_CHARACTER_ID":  conf.BattleNetCharacterID,
+			"BATTLENET_REGION":        conf.BattleNetRegion,
+			"BATTLENET_REDIRECT_URI":  conf.BattleNetRedirectURI,
+			"BATTLENET_SCOPE":         conf.BattleNetScope,
+		}
+
+		var missing []string
+		for key, value := range required {
+			if strings.TrimSpace(value) == "" {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			log.Fatalf("BATTLENET_ENABLED=true requires: %s", strings.Join(missing, ", "))
+		}
+	}
+
+	return conf
+}
