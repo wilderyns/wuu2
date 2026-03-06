@@ -1,6 +1,7 @@
 # WUU2
 
-Small Go service that periodically communicates with APIs and grabs the following data:
+Small application written in Go that uses APIs to see what you've been up to across TV, music, and games, returning it as a nicely accessible JSON.
+
 - Trakt: a single last watched movie or TV show.
 - World of Warcraft: character location and coordinates, inferring a character's online status depending on whether they've moved.
 
@@ -13,7 +14,14 @@ All this data is returned in an easy to parse JSON object.
 
 ## Run
 ```bash
+cd app
 go run .
+```
+
+## Docker
+```bash
+docker build -t wuu2:latest ./app
+docker run --rm -p 8080:8080 wuu2:latest
 ```
 
 ## Environment Variables
@@ -27,8 +35,8 @@ go run .
 
 ### Optional
 
- - `AUTH_SECURITY_CODE` (optional gate code required before `/auth/` redirects)
- - 
+- `AUTH_SECURITY_CODE` (optional gate code required before `/auth/` redirects)
+
 ### Trakt (required when `TRAKT_ENABLED=true`)
 
 - `TRAKT_ID`
@@ -77,7 +85,7 @@ AUTH_SECURITY_CODE="set-a-shared-code"
 1. In the Battle.net Developer Portal, configure your OAuth client redirect URL:
    - Must exactly match `BATTLENET_REDIRECT_URI`.
 2. Start WUU2:
-   - `go run .`
+   - `cd app && go run .`
 3. Begin OAuth:
    - Open `http://localhost:8080/auth/battlenet/start`
    - If `AUTH_SECURITY_CODE` is set, enter it first (or pass `?code=...`).
