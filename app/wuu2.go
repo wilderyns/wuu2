@@ -55,6 +55,11 @@ type Steam struct {
 	HoursPlayed int
 }
 
+type Information struct {
+	TotalRequests   uint64 `json:"totalRequests"`
+	ServerStartTime string `json:"serverStartTime"`
+}
+
 type Wuu2 struct {
 	Trakt      []Trakt
 	Wow        []Wow

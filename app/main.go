@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -13,6 +14,8 @@ import (
 )
 
 var WUU2 Wuu2
+var serverStartTime = time.Now().UTC()
+var totalRequests uint64
 
 func getUpdates(config Config) {
 	if config.TraktEnabled {
@@ -43,7 +46,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	b, err := json.Marshal(WUU2)
+	response := struct {
+		Wuu2
+		Information Information `json:"Information"`
+	}{
+		Wuu2: WUU2,
+		Information: Information{
+			TotalRequests:   atomic.LoadUint64(&totalRequests),
+			ServerStartTime: serverStartTime.Format(time.RFC3339),
+		},
+	}
+
+	b, err := json.Marshal(response)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -55,6 +69,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Println(write)
+}
+
+func withRequestMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddUint64(&totalRequests, 1)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func withCORS(config Config, next http.Handler) http.Handler {
@@ -119,7 +140,7 @@ func main() {
 		mux.HandleFunc("/auth/battlenet/callback", battleNetAuthCallbackHandler(config))
 	}
 
-	serverHandler := withCORS(config, mux)
+	serverHandler := withRequestMetrics(withCORS(config, mux))
 	go timedUpdater(config)
 	log.Printf("Listening on %s", config.Address)
 	log.Fatal(http.ListenAndServe(config.Address, serverHandler))
