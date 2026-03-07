@@ -10,20 +10,21 @@ type Trakt struct {
 }
 
 type Wow struct {
-	LastCheck  string
-	LastOnline string
-	Online     bool
-	Character  string
-	Realm      string
-	Location   string
-	X          float32
-	Y          float32
-	Z          float32
-	Facing     float32
-	AvatarURL  string
-	InsetURL   string
-	MainrawURL string
-	ArmoryURL  string
+	LastCheck    string
+	LastModified string
+	LastOnline   string
+	Online       bool
+	Character    string
+	Realm        string
+	Location     string
+	X            float32
+	Y            float32
+	Z            float32
+	Facing       float32
+	AvatarURL    string
+	InsetURL     string
+	MainrawURL   string
+	ArmoryURL    string
 }
 
 type AppleMusic struct {

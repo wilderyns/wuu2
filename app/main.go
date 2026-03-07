@@ -37,6 +37,11 @@ func timedUpdater(config Config) {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if len(WUU2.Wow) > 0 {
+		if lastModified := strings.TrimSpace(WUU2.Wow[0].LastModified); lastModified != "" {
+			w.Header().Set("Last-Modified", lastModified)
+		}
+	}
 
 	b, err := json.Marshal(WUU2)
 	if err != nil {

@@ -266,7 +266,7 @@ func getBattle(config Config, wuu2 *Wuu2) {
 		return
 	}
 
-	summary, err := fetchBattleNetProtectedCharacter(config, accessToken)
+	summary, lastModified, err := fetchBattleNetProtectedCharacter(config, accessToken)
 	if errors.Is(err, errBattleNetUnauthorized) {
 		battleAuth.enableStart()
 		battleAuth.clearAccessToken()
@@ -277,7 +277,7 @@ func getBattle(config Config, wuu2 *Wuu2) {
 			return
 		}
 
-		summary, err = fetchBattleNetProtectedCharacter(config, accessToken)
+		summary, lastModified, err = fetchBattleNetProtectedCharacter(config, accessToken)
 	}
 	if err != nil {
 		fmt.Println("Battle.net protected character request failed:", err)
@@ -302,14 +302,15 @@ func getBattle(config Config, wuu2 *Wuu2) {
 
 	now := time.Now().UTC()
 	entry := Wow{
-		LastCheck: now.Format(time.RFC3339),
-		Character: nonEmpty(summary.Character.Name, config.BattleNetCharacter),
-		Realm:     summary.Character.Realm.Name,
-		Location:  formatWowLocation(summary),
-		X:         summary.Position.X,
-		Y:         summary.Position.Y,
-		Z:         summary.Position.Z,
-		Facing:    summary.Position.Facing,
+		LastCheck:    now.Format(time.RFC3339),
+		LastModified: lastModified,
+		Character:    nonEmpty(summary.Character.Name, config.BattleNetCharacter),
+		Realm:        summary.Character.Realm.Name,
+		Location:     formatWowLocation(summary),
+		X:            summary.Position.X,
+		Y:            summary.Position.Y,
+		Z:            summary.Position.Z,
+		Facing:       summary.Position.Facing,
 	}
 	entry.AvatarURL = battleNetAssetValue(media.Assets, "avatar")
 	entry.InsetURL = battleNetAssetValue(media.Assets, "inset")
@@ -325,7 +326,7 @@ func getBattle(config Config, wuu2 *Wuu2) {
 	wuu2.Wow = []Wow{entry}
 }
 
-func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battleNetProtectedCharacterSummary, error) {
+func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battleNetProtectedCharacterSummary, string, error) {
 	var summary battleNetProtectedCharacterSummary
 
 	baseURI := strings.TrimRight(config.BattleNetRequestURI, "/")
@@ -344,7 +345,7 @@ func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battle
 
 	req, err := http.NewRequest("GET", requestURI+"?"+query.Encode(), nil)
 	if err != nil {
-		return summary, err
+		return summary, "", err
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -352,29 +353,31 @@ func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battle
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return summary, err
+		return summary, "", err
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
 
+	lastModified := strings.TrimSpace(resp.Header.Get("Last-Modified"))
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return summary, err
+		return summary, lastModified, err
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return summary, errBattleNetUnauthorized
+		return summary, lastModified, errBattleNetUnauthorized
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return summary, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
+		return summary, lastModified, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	if err := json.Unmarshal(respBody, &summary); err != nil {
-		return summary, err
+		return summary, lastModified, err
 	}
 
-	return summary, nil
+	return summary, lastModified, nil
 }
 
 func fetchBattleNetCharacterMedia(config Config, accessToken string, summary battleNetProtectedCharacterSummary) (battleNetCharacterMedia, error) {
