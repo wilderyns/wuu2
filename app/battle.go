@@ -120,6 +120,9 @@ func battleNetAuthCallbackHandler(config Config) http.HandlerFunc {
 			return
 		}
 
+		// Refresh WoW snapshot immediately after successful OAuth.
+		getBattle(config, &WUU2)
+
 		_, _ = w.Write([]byte("Battle.net auth complete. You can close this tab."))
 	}
 }
