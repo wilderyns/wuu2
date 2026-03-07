@@ -11,10 +11,12 @@ import (
 )
 
 type Config struct {
-	UpdateIntervalMinutes time.Duration `env:"UPDATE_INTERVAL_MINUTES,required"`
-	Address               string        `env:"ADDRESS"`
-	Port                  string        `env:"PORT"`
-	CORSAllowOrigin       string        `env:"CORS_ALLOW_ORIGIN" envDefault:"*"`
+	UpdateIntervalMinutes   time.Duration `env:"UPDATE_INTERVAL_MINUTES,required"`
+	Address                 string        `env:"ADDRESS"`
+	Port                    string        `env:"PORT"`
+	CORSAllowOrigin         string        `env:"CORS_ALLOW_ORIGIN" envDefault:"*"`
+	PersistenceDirectory    string        `env:"PERSISTENCE_DIRECTORY" envDefault:"/tmp/wuu2"`
+	TokenPersistenceEnabled bool          `env:"TOKEN_PERSISTENCE_ENABLED" envDefault:"false"`
 
 	TraktEnabled bool   `env:"TRAKT_ENABLED"`
 	TraktID      string `env:"TRAKT_ID"`
@@ -42,6 +44,10 @@ func loadConfig() Config {
 	}
 
 	conf.Address = resolveListenAddress(conf.Address, conf.Port)
+	conf.PersistenceDirectory = strings.TrimSpace(conf.PersistenceDirectory)
+	if conf.PersistenceDirectory == "" {
+		conf.PersistenceDirectory = "/tmp/wuu2"
+	}
 
 	if conf.TraktEnabled && strings.TrimSpace(conf.TraktID) == "" {
 		log.Fatal("TRAKT_ENABLED=true requires TRAKT_ID")

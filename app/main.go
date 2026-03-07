@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -18,17 +17,27 @@ var serverStartTime = time.Now().UTC()
 var totalRequests uint64
 
 func getUpdates(config Config) {
+	snapshotUpdateMu.Lock()
+	defer snapshotUpdateMu.Unlock()
+
+	snapshot := getCurrentWuu2Snapshot()
+
 	if config.TraktEnabled {
-		getTrakt(config, &WUU2)
+		getTrakt(config, &snapshot)
 	}
 
 	if config.BattleNetEnabled {
-		getBattle(config, &WUU2)
+		getBattle(config, &snapshot)
 	}
 
 	// TODO: Update Steam
 
 	// TODO: Update Apple Music
+
+	setCurrentWuu2Snapshot(snapshot)
+	if err := persistWuu2Snapshot(snapshotFilePathForDirectory(config.PersistenceDirectory), snapshot); err != nil {
+		log.Printf("Failed persisting snapshot file: %v", err)
+	}
 }
 
 func timedUpdater(config Config) {
@@ -40,6 +49,14 @@ func timedUpdater(config Config) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	snapshot := getCurrentWuu2Snapshot()
+	if !hasWuu2Data(snapshot) {
+		if err := ensureSnapshotLoadedFromDisk(); err != nil {
+			log.Printf("Snapshot fallback load failed: %v", err)
+		}
+		snapshot = getCurrentWuu2Snapshot()
+	}
+
 	responseGeneratedAt := time.Now().UTC()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Last-Modified", responseGeneratedAt.Format(http.TimeFormat))
@@ -48,7 +65,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		Wuu2
 		Information Information `json:"Information"`
 	}{
-		Wuu2: WUU2,
+		Wuu2: snapshot,
 		Information: Information{
 			TotalRequests:   atomic.LoadUint64(&totalRequests),
 			ServerStartTime: serverStartTime.Format(time.RFC3339),
@@ -57,16 +74,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	b, err := json.Marshal(response)
 	if err != nil {
-		fmt.Println(err)
+		http.Error(w, "failed to marshal response", http.StatusInternalServerError)
 		return
 	}
 
-	write, err := w.Write(b)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-
-	fmt.Println(write)
+	_, _ = w.Write(b)
 }
 
 func withRequestMetrics(next http.Handler) http.Handler {
@@ -130,6 +142,17 @@ func main() {
 	}
 
 	var config = loadConfig()
+	configureSnapshotFile(snapshotFilePathForDirectory(config.PersistenceDirectory))
+	if err := ensureSnapshotLoadedFromDisk(); err != nil {
+		log.Printf("Failed loading snapshot file: %v", err)
+	}
+
+	configureBattleNetTokenPersistence(config.TokenPersistenceEnabled, config.PersistenceDirectory)
+	if config.BattleNetEnabled {
+		if err := battleAuth.loadPersistedTokenState(); err != nil {
+			log.Printf("Failed loading Battle.net token file: %v", err)
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler)

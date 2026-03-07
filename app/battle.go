@@ -72,7 +72,17 @@ type battleNetAuthState struct {
 var battleAuth = battleNetAuthState{
 	startEnabled: true,
 }
+var battleUpdateMu sync.Mutex
+var battleNetTokenFilePath string
 var wowMovementHistory []Wow
+
+func configureBattleNetTokenPersistence(enabled bool, persistenceDirectory string) {
+	if !enabled {
+		battleNetTokenFilePath = ""
+		return
+	}
+	battleNetTokenFilePath = tokenFilePathForDirectory(persistenceDirectory, "battlenet")
+}
 
 func battleNetAuthStartHandler(config Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +131,9 @@ func battleNetAuthCallbackHandler(config Config) http.HandlerFunc {
 		}
 
 		// Refresh WoW snapshot immediately after successful OAuth.
-		getBattle(config, &WUU2)
+		if err := refreshBattleAndPersist(config); err != nil {
+			fmt.Println("Battle.net snapshot refresh failed:", err)
+		}
 
 		_, _ = w.Write([]byte("Battle.net auth complete. You can close this tab."))
 	}
@@ -148,6 +160,9 @@ func (s *battleNetAuthState) clearAccessToken() {
 	defer s.mu.Unlock()
 	s.accessToken = ""
 	s.expiresAt = time.Time{}
+	if err := s.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
 }
 
 func (s *battleNetAuthState) isStartEnabled() bool {
@@ -160,6 +175,9 @@ func (s *battleNetAuthState) enableStart() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.startEnabled = true
+	if err := s.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
 }
 
 func (s *battleNetAuthState) ensureAccessToken(config Config) (string, error) {
@@ -186,6 +204,9 @@ func (s *battleNetAuthState) ensureAccessToken(config Config) (string, error) {
 
 	if s.authCode == "" {
 		s.startEnabled = true
+		if err := s.persistTokenStateLocked(); err != nil {
+			fmt.Println("Failed writing Battle.net token file:", err)
+		}
 		return "", fmt.Errorf("battlenet auth required: open %s", buildBattleNetAuthorizeURL(config, ""))
 	}
 
@@ -216,6 +237,52 @@ func (s *battleNetAuthState) applyToken(token battleNetTokenResponse, now time.T
 		s.expiresAt = now.Add(12 * time.Hour)
 	}
 	s.startEnabled = false
+	if err := s.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
+}
+
+func (s *battleNetAuthState) loadPersistedTokenState() error {
+	persisted, err := loadPersistedAuthTokenState(battleNetTokenFilePath)
+	if err != nil {
+		return err
+	}
+
+	var parsedExpiry time.Time
+	expiresAtRaw := strings.TrimSpace(persisted.ExpiresAt)
+	if expiresAtRaw != "" {
+		parsedExpiry, err = time.Parse(time.RFC3339, expiresAtRaw)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.accessToken = strings.TrimSpace(persisted.AccessToken)
+	s.refreshToken = strings.TrimSpace(persisted.RefreshToken)
+	s.expiresAt = parsedExpiry
+	s.startEnabled = persisted.StartEnabled
+
+	if s.accessToken == "" && s.refreshToken == "" {
+		s.startEnabled = true
+	}
+
+	return nil
+}
+
+func (s *battleNetAuthState) persistTokenStateLocked() error {
+	persisted := persistedAuthTokenState{
+		AccessToken:  s.accessToken,
+		RefreshToken: s.refreshToken,
+		StartEnabled: s.startEnabled,
+	}
+	if !s.expiresAt.IsZero() {
+		persisted.ExpiresAt = s.expiresAt.UTC().Format(time.RFC3339)
+	}
+
+	return savePersistedAuthTokenState(battleNetTokenFilePath, persisted)
 }
 
 func exchangeBattleNetToken(config Config, values url.Values) (battleNetTokenResponse, error) {
@@ -257,7 +324,20 @@ func exchangeBattleNetToken(config Config, values url.Values) (battleNetTokenRes
 	return token, nil
 }
 
+func refreshBattleAndPersist(config Config) error {
+	snapshotUpdateMu.Lock()
+	defer snapshotUpdateMu.Unlock()
+
+	snapshot := getCurrentWuu2Snapshot()
+	getBattle(config, &snapshot)
+	setCurrentWuu2Snapshot(snapshot)
+	return persistWuu2Snapshot(snapshotFilePathForDirectory(config.PersistenceDirectory), snapshot)
+}
+
 func getBattle(config Config, wuu2 *Wuu2) {
+	battleUpdateMu.Lock()
+	defer battleUpdateMu.Unlock()
+
 	if !hasBattleNetConfig(config) {
 		fmt.Println("Battle.net config missing. Skipping WoW update.")
 		return
