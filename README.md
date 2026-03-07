@@ -3,14 +3,21 @@
 Small application written in Go that uses APIs to see what you've been up to across TV, music, and games, returning it as a nicely accessible JSON.
 
 - Trakt: a single last watched movie or TV show.
-- World of Warcraft: character location and coordinates, inferring a character's online status depending on whether they've moved.
+- World of Warcraft: character location and coordinates, as well as avatar
 
-Planned:
+Planned Additions:
 - Apple Music: last song/album/artist listened to.
 - Steam: current game being played.
 - Spotify: last song/album/artist listened to.
+- Retroachievements: score and recent achievements.
+- Playstation Trophies: Current game being played, trophy count, recent trophies.
+- XBOX: Current game being played, achievements, gamerscore.
 
-All this data is returned in an easy to parse JSON object.
+Planned Additional Features 
+- WoW: Return last played character on the account as opposed to a predefined character.
+- WoW: Return additional information like gold amount, achievements, pvp bracket, and mythic+ score
+
+- All this data is returned in an easy to parse JSON object.
 
 ## Run
 ```bash
@@ -23,6 +30,10 @@ go run .
 docker build -t wuu2:latest ./app
 docker run --rm -p 8080:8080 wuu2:latest
 ```
+
+## Caveats
+### World of Warcraft
+Although the intention was to use character coordinates to determine online status, the protected character API only updates when a player logs out. Keys supporting online and last online status are still included and updated, however they are in no way reliable. 
 
 ## Environment Variables
 
