@@ -362,7 +362,7 @@ func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battle
 		_ = Body.Close()
 	}(resp.Body)
 
-	lastModified := strings.TrimSpace(resp.Header.Get("Last-Modified"))
+	lastModified := parseBattleNetLastModified(resp.Header.Get("Last-Modified"))
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -381,6 +381,14 @@ func fetchBattleNetProtectedCharacter(config Config, accessToken string) (battle
 	}
 
 	return summary, lastModified, nil
+}
+
+func parseBattleNetLastModified(raw string) string {
+	lastModified := strings.TrimSpace(raw)
+	if parsed, err := parseDateTimeString(lastModified); err == nil {
+		return parsed.UTC().Format(time.RFC3339)
+	}
+	return lastModified
 }
 
 func fetchBattleNetCharacterMedia(config Config, accessToken string, summary battleNetProtectedCharacterSummary) (battleNetCharacterMedia, error) {

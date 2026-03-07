@@ -26,12 +26,13 @@ func getUpdates(config Config) {
 		getBattle(config, &WUU2)
 	}
 
-	// Update Steam
+	// TODO: Update Steam
 
 	// TODO: Update Apple Music
 }
 
 func timedUpdater(config Config) {
+	// Run as go routine to run updates on schedule
 	getUpdates(config)
 	for range time.Tick(config.UpdateIntervalMinutes) {
 		getUpdates(config)
@@ -39,12 +40,9 @@ func timedUpdater(config Config) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	responseGeneratedAt := time.Now().UTC()
 	w.Header().Set("Content-Type", "application/json")
-	if len(WUU2.Wow) > 0 {
-		if lastModified := strings.TrimSpace(WUU2.Wow[0].LastModified); lastModified != "" {
-			w.Header().Set("Last-Modified", lastModified)
-		}
-	}
+	w.Header().Set("Last-Modified", responseGeneratedAt.Format(http.TimeFormat))
 
 	response := struct {
 		Wuu2
