@@ -5,80 +5,89 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/joho/godotenv"
-	_ "github.com/joho/godotenv"
+
+	"wuu2/internal/config"
+	"wuu2/internal/integrations/applemusic"
+	"wuu2/internal/integrations/battle"
+	"wuu2/internal/integrations/steam"
+	"wuu2/internal/integrations/trakt"
+	"wuu2/internal/lib/authgate"
+	"wuu2/internal/lib/persistence"
+	"wuu2/internal/model"
 )
 
-var WUU2 Wuu2
 var serverStartTime = time.Now().UTC()
 var totalRequests uint64
+var snapshotUpdateMu sync.Mutex
 
-func getUpdates(config Config) {
+func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
 	snapshotUpdateMu.Lock()
 	defer snapshotUpdateMu.Unlock()
 
-	snapshot := getCurrentWuu2Snapshot()
+	snapshot := store.Get()
 
-	if config.TraktEnabled {
-		getTrakt(config, &snapshot)
+	if cfg.TraktEnabled {
+		trakt.Update(cfg, &snapshot)
 	}
 
-	if config.BattleNetEnabled {
-		getBattle(config, &snapshot)
+	if cfg.BattleNetEnabled {
+		battleClient.Update(&snapshot)
 	}
 
-	// TODO: Update Steam
+	steam.Update(cfg, &snapshot)
+	applemusic.Update(cfg, &snapshot)
 
-	// TODO: Update Apple Music
-
-	setCurrentWuu2Snapshot(snapshot)
-	if err := persistWuu2Snapshot(snapshotFilePathForDirectory(config.PersistenceDirectory), snapshot); err != nil {
+	store.Set(snapshot)
+	if err := store.Persist(snapshot); err != nil {
 		log.Printf("Failed persisting snapshot file: %v", err)
 	}
 }
 
-func timedUpdater(config Config) {
-	// Run as go routine to run updates on schedule
-	getUpdates(config)
-	for range time.Tick(config.UpdateIntervalMinutes) {
-		getUpdates(config)
+func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
+	getUpdates(cfg, store, battleClient)
+	for range time.Tick(cfg.UpdateIntervalMinutes) {
+		getUpdates(cfg, store, battleClient)
 	}
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	snapshot := getCurrentWuu2Snapshot()
-	if !hasWuu2Data(snapshot) {
-		if err := ensureSnapshotLoadedFromDisk(); err != nil {
-			log.Printf("Snapshot fallback load failed: %v", err)
+func handler(store *persistence.SnapshotStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		snapshot := store.Get()
+		if !persistence.HasWuu2Data(snapshot) {
+			if err := store.EnsureLoadedFromDisk(); err != nil {
+				log.Printf("Snapshot fallback load failed: %v", err)
+			}
+			snapshot = store.Get()
 		}
-		snapshot = getCurrentWuu2Snapshot()
+
+		responseGeneratedAt := time.Now().UTC()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Last-Modified", responseGeneratedAt.Format(http.TimeFormat))
+
+		response := struct {
+			model.Wuu2
+			Information model.Information `json:"Information"`
+		}{
+			Wuu2: snapshot,
+			Information: model.Information{
+				TotalRequests:   atomic.LoadUint64(&totalRequests),
+				ServerStartTime: serverStartTime.Format(time.RFC3339),
+			},
+		}
+
+		b, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "failed to marshal response", http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = w.Write(b)
 	}
-
-	responseGeneratedAt := time.Now().UTC()
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Last-Modified", responseGeneratedAt.Format(http.TimeFormat))
-
-	response := struct {
-		Wuu2
-		Information Information `json:"Information"`
-	}{
-		Wuu2: snapshot,
-		Information: Information{
-			TotalRequests:   atomic.LoadUint64(&totalRequests),
-			ServerStartTime: serverStartTime.Format(time.RFC3339),
-		},
-	}
-
-	b, err := json.Marshal(response)
-	if err != nil {
-		http.Error(w, "failed to marshal response", http.StatusInternalServerError)
-		return
-	}
-
-	_, _ = w.Write(b)
 }
 
 func withRequestMetrics(next http.Handler) http.Handler {
@@ -88,8 +97,8 @@ func withRequestMetrics(next http.Handler) http.Handler {
 	})
 }
 
-func withCORS(config Config, next http.Handler) http.Handler {
-	allowedOrigins := parseAllowedOrigins(config.CORSAllowOrigin)
+func withCORS(cfg config.Config, next http.Handler) http.Handler {
+	allowedOrigins := parseAllowedOrigins(cfg.CORSAllowOrigin)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applyCORSHeaders(w, r, allowedOrigins)
@@ -136,33 +145,42 @@ func parseAllowedOrigins(raw string) map[string]struct{} {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
+	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	var config = loadConfig()
-	configureSnapshotFile(snapshotFilePathForDirectory(config.PersistenceDirectory))
-	if err := ensureSnapshotLoadedFromDisk(); err != nil {
+	cfg := config.Load()
+	store := persistence.NewSnapshotStore(persistence.SnapshotFilePathForDirectory(cfg.PersistenceDirectory))
+	if err := store.EnsureLoadedFromDisk(); err != nil {
 		log.Printf("Failed loading snapshot file: %v", err)
 	}
 
-	configureBattleNetTokenPersistence(config.TokenPersistenceEnabled, config.PersistenceDirectory)
-	if config.BattleNetEnabled {
-		if err := battleAuth.loadPersistedTokenState(); err != nil {
+	battleClient := battle.NewClient(cfg)
+	if cfg.BattleNetEnabled {
+		if err := battleClient.LoadPersistedTokenState(); err != nil {
 			log.Printf("Failed loading Battle.net token file: %v", err)
 		}
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handler)
-	if config.BattleNetEnabled {
-		mux.HandleFunc("/auth/battlenet/start", withAuthSecurityGate(config, "Battle.net OAuth", battleNetAuthStartHandler(config)))
-		mux.HandleFunc("/auth/battlenet/callback", battleNetAuthCallbackHandler(config))
+	refreshBattleAndPersist := func() error {
+		snapshotUpdateMu.Lock()
+		defer snapshotUpdateMu.Unlock()
+
+		snapshot := store.Get()
+		battleClient.Update(&snapshot)
+		store.Set(snapshot)
+		return store.Persist(snapshot)
 	}
 
-	serverHandler := withRequestMetrics(withCORS(config, mux))
-	go timedUpdater(config)
-	log.Printf("Listening on %s", config.Address)
-	log.Fatal(http.ListenAndServe(config.Address, serverHandler))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler(store))
+	if cfg.BattleNetEnabled {
+		mux.HandleFunc("/auth/battlenet/start", authgate.WithSecurityGate(cfg.AuthSecurityCode, "Battle.net OAuth", battleClient.AuthStartHandler()))
+		mux.HandleFunc("/auth/battlenet/callback", battleClient.AuthCallbackHandler(refreshBattleAndPersist))
+	}
+
+	serverHandler := withRequestMetrics(withCORS(cfg, mux))
+	go timedUpdater(cfg, store, battleClient)
+	log.Printf("Listening on %s", cfg.Address)
+	log.Fatal(http.ListenAndServe(cfg.Address, serverHandler))
 }

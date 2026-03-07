@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"log"
@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v6"
-	_ "github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -37,7 +36,7 @@ type Config struct {
 	BattleNetScope        string `env:"BATTLENET_SCOPE"`
 }
 
-func loadConfig() Config {
+func Load() Config {
 	var conf Config
 	if err := env.Parse(&conf); err != nil {
 		log.Fatalf("Failed to parse environment variables: %v", err)
@@ -83,7 +82,6 @@ func resolveListenAddress(address string, port string) string {
 	address = strings.TrimSpace(address)
 	port = strings.TrimSpace(port)
 
-	// Cloud Run sets PORT; default to binding all interfaces on that port.
 	if address == "" {
 		if port != "" {
 			return ":" + port
@@ -91,8 +89,6 @@ func resolveListenAddress(address string, port string) string {
 		return ":8080"
 	}
 
-	// If an localhost bind is configured, convert to all interfaces so
-	// container platforms (Cloud Run) can reach the process.
 	host, p, err := net.SplitHostPort(address)
 	if err == nil {
 		if host == "localhost" || host == "127.0.0.1" {

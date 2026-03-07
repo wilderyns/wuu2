@@ -1,4 +1,4 @@
-package main
+package persistence
 
 import (
 	"encoding/json"
@@ -7,15 +7,15 @@ import (
 	"strings"
 )
 
-type persistedAuthTokenState struct {
+type AuthTokenState struct {
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
 	ExpiresAt    string `json:"expiresAt,omitempty"`
 	StartEnabled bool   `json:"startEnabled"`
 }
 
-func loadPersistedAuthTokenState(path string) (persistedAuthTokenState, error) {
-	var persisted persistedAuthTokenState
+func LoadAuthTokenState(path string) (AuthTokenState, error) {
+	var persisted AuthTokenState
 
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -41,7 +41,7 @@ func loadPersistedAuthTokenState(path string) (persistedAuthTokenState, error) {
 	return persisted, nil
 }
 
-func savePersistedAuthTokenState(path string, persisted persistedAuthTokenState) error {
+func SaveAuthTokenState(path string, persisted AuthTokenState) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil

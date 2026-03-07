@@ -1,4 +1,4 @@
-package main
+package timeutil
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func parseDateTimeString(raw string) (time.Time, error) {
+func ParseDateTimeString(raw string) (time.Time, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return time.Time{}, errors.New("empty time value")
@@ -21,7 +21,6 @@ func parseDateTimeString(raw string) (time.Time, error) {
 		return parsed, nil
 	}
 
-	// Handle RFC1123-like timestamps with single-digit day values.
 	if parsed, err := time.Parse("Mon, 2 Jan 2006 15:04:05 MST", value); err == nil {
 		return parsed, nil
 	}

@@ -1,4 +1,4 @@
-package main
+package persistence
 
 import (
 	"encoding/json"
@@ -7,19 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"wuu2/internal/model"
 )
 
-var wuu2StateMu sync.RWMutex
-var snapshotUpdateMu sync.Mutex
-var snapshotFilePath string
-var snapshotLoadOnce sync.Once
-var snapshotLoadErr error
-
-func configureSnapshotFile(path string) {
-	snapshotFilePath = strings.TrimSpace(path)
+type SnapshotStore struct {
+	mu               sync.RWMutex
+	snapshot         model.Wuu2
+	snapshotFilePath string
+	loadOnce         sync.Once
+	loadErr          error
 }
 
-func snapshotFilePathForDirectory(dir string) string {
+func NewSnapshotStore(path string) *SnapshotStore {
+	return &SnapshotStore{snapshotFilePath: strings.TrimSpace(path)}
+}
+
+func SnapshotFilePathForDirectory(dir string) string {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		dir = "/tmp/wuu2"
@@ -27,7 +31,7 @@ func snapshotFilePathForDirectory(dir string) string {
 	return filepath.Join(dir, "snapshot.json")
 }
 
-func tokenFilePathForDirectory(dir string, provider string) string {
+func TokenFilePathForDirectory(dir string, provider string) string {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		dir = "/tmp/wuu2"
@@ -41,9 +45,9 @@ func tokenFilePathForDirectory(dir string, provider string) string {
 	return filepath.Join(dir, "tokens", provider+".json")
 }
 
-func ensureSnapshotLoadedFromDisk() error {
-	snapshotLoadOnce.Do(func() {
-		path := strings.TrimSpace(snapshotFilePath)
+func (s *SnapshotStore) EnsureLoadedFromDisk() error {
+	s.loadOnce.Do(func() {
+		path := strings.TrimSpace(s.snapshotFilePath)
 		if path == "" {
 			return
 		}
@@ -53,32 +57,32 @@ func ensureSnapshotLoadedFromDisk() error {
 			if errors.Is(err, os.ErrNotExist) {
 				return
 			}
-			snapshotLoadErr = err
+			s.loadErr = err
 			return
 		}
 
-		if hasWuu2Data(snapshot) {
-			setCurrentWuu2Snapshot(snapshot)
+		if HasWuu2Data(snapshot) {
+			s.Set(snapshot)
 		}
 	})
 
-	return snapshotLoadErr
+	return s.loadErr
 }
 
-func getCurrentWuu2Snapshot() Wuu2 {
-	wuu2StateMu.RLock()
-	defer wuu2StateMu.RUnlock()
-	return copyWuu2Snapshot(WUU2)
+func (s *SnapshotStore) Get() model.Wuu2 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return copyWuu2Snapshot(s.snapshot)
 }
 
-func setCurrentWuu2Snapshot(snapshot Wuu2) {
-	wuu2StateMu.Lock()
-	defer wuu2StateMu.Unlock()
-	WUU2 = copyWuu2Snapshot(snapshot)
+func (s *SnapshotStore) Set(snapshot model.Wuu2) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot = copyWuu2Snapshot(snapshot)
 }
 
-func persistWuu2Snapshot(path string, snapshot Wuu2) error {
-	path = strings.TrimSpace(path)
+func (s *SnapshotStore) Persist(snapshot model.Wuu2) error {
+	path := strings.TrimSpace(s.snapshotFilePath)
 	if path == "" {
 		return nil
 	}
@@ -91,8 +95,20 @@ func persistWuu2Snapshot(path string, snapshot Wuu2) error {
 	return writeFileAtomically(path, payload, 0o644)
 }
 
-func readWuu2Snapshot(path string) (Wuu2, error) {
-	var snapshot Wuu2
+func (s *SnapshotStore) PersistCurrent() error {
+	return s.Persist(s.Get())
+}
+
+func HasWuu2Data(snapshot model.Wuu2) bool {
+	return len(snapshot.Trakt) > 0 ||
+		len(snapshot.Wow) > 0 ||
+		len(snapshot.AppleMusic) > 0 ||
+		len(snapshot.Spotify) > 0 ||
+		len(snapshot.Steam) > 0
+}
+
+func readWuu2Snapshot(path string) (model.Wuu2, error) {
+	var snapshot model.Wuu2
 
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -115,31 +131,23 @@ func readWuu2Snapshot(path string) (Wuu2, error) {
 	return snapshot, nil
 }
 
-func hasWuu2Data(snapshot Wuu2) bool {
-	return len(snapshot.Trakt) > 0 ||
-		len(snapshot.Wow) > 0 ||
-		len(snapshot.AppleMusic) > 0 ||
-		len(snapshot.Spotify) > 0 ||
-		len(snapshot.Steam) > 0
-}
-
-func copyWuu2Snapshot(src Wuu2) Wuu2 {
-	dst := Wuu2{}
+func copyWuu2Snapshot(src model.Wuu2) model.Wuu2 {
+	dst := model.Wuu2{}
 
 	if len(src.Trakt) > 0 {
-		dst.Trakt = append([]Trakt(nil), src.Trakt...)
+		dst.Trakt = append([]model.Trakt(nil), src.Trakt...)
 	}
 	if len(src.Wow) > 0 {
-		dst.Wow = append([]Wow(nil), src.Wow...)
+		dst.Wow = append([]model.Wow(nil), src.Wow...)
 	}
 	if len(src.AppleMusic) > 0 {
-		dst.AppleMusic = append([]AppleMusic(nil), src.AppleMusic...)
+		dst.AppleMusic = append([]model.AppleMusic(nil), src.AppleMusic...)
 	}
 	if len(src.Spotify) > 0 {
-		dst.Spotify = append([]Spotify(nil), src.Spotify...)
+		dst.Spotify = append([]model.Spotify(nil), src.Spotify...)
 	}
 	if len(src.Steam) > 0 {
-		dst.Steam = append([]Steam(nil), src.Steam...)
+		dst.Steam = append([]model.Steam(nil), src.Steam...)
 	}
 
 	return dst

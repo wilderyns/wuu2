@@ -1,4 +1,4 @@
-package main
+package authgate
 
 import (
 	"crypto/subtle"
@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-type authGateViewData struct {
+type viewData struct {
 	Title   string
 	Message string
 	Action  string
 }
 
-var authGateTemplate = template.Must(template.New("auth_gate").Parse(`<!doctype html>
+var gateTemplate = template.Must(template.New("auth_gate").Parse(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -36,23 +36,23 @@ var authGateTemplate = template.Must(template.New("auth_gate").Parse(`<!doctype 
 </body>
 </html>`))
 
-func withAuthSecurityGate(config Config, flowName string, next http.HandlerFunc) http.HandlerFunc {
+func WithSecurityGate(code string, flowName string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		expected := strings.TrimSpace(config.AuthSecurityCode)
+		expected := strings.TrimSpace(code)
 		if expected == "" {
 			next(w, r)
 			return
 		}
 
-		provided := extractAuthGateCode(r)
-		if authGateCodeMatches(expected, provided) {
+		provided := extractCode(r)
+		if codeMatches(expected, provided) {
 			next(w, r)
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = authGateTemplate.Execute(w, authGateViewData{
+		_ = gateTemplate.Execute(w, viewData{
 			Title:   gateTitle(flowName),
 			Message: gateMessage(flowName),
 			Action:  r.URL.Path,
@@ -60,7 +60,7 @@ func withAuthSecurityGate(config Config, flowName string, next http.HandlerFunc)
 	}
 }
 
-func extractAuthGateCode(r *http.Request) string {
+func extractCode(r *http.Request) string {
 	provided := strings.TrimSpace(r.URL.Query().Get("code"))
 	if provided != "" {
 		return provided
@@ -72,7 +72,7 @@ func extractAuthGateCode(r *http.Request) string {
 	return strings.TrimSpace(r.FormValue("code"))
 }
 
-func authGateCodeMatches(expected string, provided string) bool {
+func codeMatches(expected string, provided string) bool {
 	if expected == "" || provided == "" {
 		return false
 	}

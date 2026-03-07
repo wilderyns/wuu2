@@ -1,4 +1,4 @@
-package main
+package trakt
 
 import (
 	"encoding/json"
@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"strconv"
 
-	_ "github.com/joho/godotenv"
+	"wuu2/internal/config"
+	"wuu2/internal/model"
 )
 
-type traktHistoryItem struct {
+type historyItem struct {
 	WatchedAt string `json:"watched_at"`
 	Type      string `json:"type"`
 	Movie     struct {
@@ -35,24 +36,21 @@ type traktHistoryItem struct {
 	} `json:"show"`
 }
 
-func getTrakt(config Config, wuu2 *Wuu2) {
+func Update(cfg config.Config, snapshot *model.Wuu2) {
 	client := &http.Client{}
 
 	req, _ := http.NewRequest("GET", "https://api.trakt.tv/users/wilderyns/history?page=1&limit=1", nil)
-
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("trakt-api-version", "2")
-	req.Header.Add("trakt-api-key", config.TraktID)
+	req.Header.Add("trakt-api-key", cfg.TraktID)
 
 	resp, err := client.Do(req)
-
 	if err != nil {
 		fmt.Println("Errored when sending request to the server")
 		return
 	}
-
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func(body io.ReadCloser) {
+		err := body.Close()
 		if err != nil {
 			fmt.Println("Error closing response body")
 		}
@@ -64,19 +62,19 @@ func getTrakt(config Config, wuu2 *Wuu2) {
 		return
 	}
 
-	var history []traktHistoryItem
+	var history []historyItem
 	if err := json.Unmarshal(respBody, &history); err != nil {
 		fmt.Println("Error unmarshalling Trakt response")
 		return
 	}
 
 	if len(history) == 0 {
-		wuu2.Trakt = nil
+		snapshot.Trakt = nil
 		return
 	}
 
 	item := history[0]
-	traktItem := Trakt{
+	traktItem := model.Trakt{
 		WatchedAt: item.WatchedAt,
 		Type:      item.Type,
 	}
@@ -99,11 +97,9 @@ func getTrakt(config Config, wuu2 *Wuu2) {
 			traktItem.IMDB = item.Episode.IDs.IMDB
 		}
 	default:
-		// Best-effort fallback if Trakt adds or returns other item types.
 		traktItem.Title = item.Movie.Title
 		traktItem.IMDB = item.Movie.IDs.IMDB
 	}
 
-	// Public payload should contain only the latest Trakt snapshot.
-	wuu2.Trakt = []Trakt{traktItem}
+	snapshot.Trakt = []model.Trakt{traktItem}
 }
