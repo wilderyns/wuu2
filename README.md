@@ -8,20 +8,7 @@ A small application written in Go that uses APIs to see what you've been up to a
 
 - Trakt: a single last watched movie or TV show.
 - World of Warcraft: character location and coordinates, as well as avatar
-
-Planned Additions:
-- Apple Music: last song/album/artist listened to.
-- Steam: current game being played.
-- Spotify: last song/album/artist listened to.
-- Retroachievements: score and recent achievements.
-- Playstation Trophies: Current game being played, trophy count, recent trophies.
-- XBOX: Current game being played, achievements, gamerscore.
-
-Planned Additional Features 
-- WoW: Return last played character on the account as opposed to a predefined character.
-- WoW: Return additional information like gold amount, achievements, pvp bracket, and mythic+ score
-
-- All this data is returned in an easy to parse JSON object.
+- More integrations planned, see wiki for details
 
 ### Getting Started
 
