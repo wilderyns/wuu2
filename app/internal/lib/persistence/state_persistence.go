@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"wuu2/internal/model"
 )
@@ -178,7 +179,7 @@ func writeFileAtomically(path string, payload []byte, mode os.FileMode) error {
 		_ = os.Remove(tmpName)
 	}()
 
-	if err := tmp.Chmod(mode); err != nil {
+	if err := tmp.Chmod(mode); err != nil && !isIgnorableChmodError(err) {
 		_ = tmp.Close()
 		return err
 	}
@@ -201,5 +202,16 @@ func writeFileAtomically(path string, payload []byte, mode os.FileMode) error {
 		return err
 	}
 
-	return os.Chmod(path, mode)
+	if err := os.Chmod(path, mode); err != nil && !isIgnorableChmodError(err) {
+		return err
+	}
+
+	return nil
+}
+
+func isIgnorableChmodError(err error) bool {
+	return errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.EOPNOTSUPP)
 }
