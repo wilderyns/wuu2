@@ -56,6 +56,7 @@ type Steam struct {
 }
 
 type Information struct {
+	Version         string `json:"version"`
 	TotalRequests   uint64 `json:"totalRequests"`
 	ServerStartTime string `json:"serverStartTime"`
 }
