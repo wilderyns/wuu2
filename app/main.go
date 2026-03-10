@@ -145,23 +145,34 @@ func parseAllowedOrigins(raw string) map[string]struct{} {
 }
 
 func main() {
+	// Load config
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
-
 	cfg := config.Load()
+
+	// Decide if we're using on disk persistence
+	if cfg.PersistenceDirectory == "" {
+		log.Println("No persistence directory specified, using in-memory persistence")
+	} else {
+		log.Printf("Using persistence directory: %s", cfg.PersistenceDirectory)
+	}
 	store := persistence.NewSnapshotStore(persistence.SnapshotFilePathForDirectory(cfg.PersistenceDirectory))
 	if err := store.EnsureLoadedFromDisk(); err != nil {
 		log.Printf("Failed loading snapshot file: %v", err)
 	}
 
+	// Handle auth token persistence loading
+	// Battle.net: determine existing auth token
 	battleClient := battle.NewClient(cfg)
-	if cfg.BattleNetEnabled {
+	if cfg.BattleNetEnabled && cfg.PersistenceDirectory != "" {
 		if err := battleClient.LoadPersistedTokenState(); err != nil {
+			//TODO: Specify only to show an error if we've previously set a persistence token maybe
 			log.Printf("Failed loading Battle.net token file: %v", err)
 		}
 	}
 
+	// Load pers
 	refreshBattleAndPersist := func() error {
 		snapshotUpdateMu.Lock()
 		defer snapshotUpdateMu.Unlock()

@@ -30,7 +30,7 @@ var gateTemplate = template.Must(template.New("auth_gate").Parse(`<!doctype html
   <h1>Enter Security Code</h1>
   <p class="note">{{.Message}}</p>
   <form method="post" action="{{.Action}}">
-    <input type="password" name="code" autocomplete="one-time-code" placeholder="Security code" required>
+    <input type="password" name="code" autocomplete="wuu2-security-code" placeholder="Security code" required>
     <button type="submit">Continue</button>
   </form>
 </body>
