@@ -48,11 +48,11 @@ type Spotify struct {
 }
 
 type Steam struct {
-	LastChange  string
-	Game        string
-	GameLink    string
-	AvatarURL   string
-	HoursPlayed int
+	LastChange       string
+	GameName         string
+	GameURL          string
+	ProfileAvatarURL string
+	HoursPlayed      int
 }
 
 type Information struct {
