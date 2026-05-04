@@ -1,0 +1,201 @@
+package retroachievements
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"wuu2/internal/config"
+	"wuu2/internal/model"
+)
+
+const siteURL = "https://retroachievements.org"
+
+var (
+	httpClient     = http.DefaultClient
+	userProfileURL = siteURL + "/API/API_GetUserProfile.php"
+	userSummaryURL = siteURL + "/API/API_GetUserSummary.php"
+)
+
+type userProfileResponse struct {
+	User                string `json:"User"`
+	ULID                string `json:"ULID"`
+	UserPic             string `json:"UserPic"`
+	RichPresenceMsg     string `json:"RichPresenceMsg"`
+	LastGameID          int    `json:"LastGameID"`
+	TotalPoints         int    `json:"TotalPoints"`
+	TotalSoftcorePoints int    `json:"TotalSoftcorePoints"`
+	TotalTruePoints     int    `json:"TotalTruePoints"`
+}
+
+type userSummaryResponse struct {
+	Rank            int    `json:"Rank"`
+	Status          string `json:"Status"`
+	RichPresenceMsg string `json:"RichPresenceMsg"`
+	LastGame        struct {
+		ID    int    `json:"ID"`
+		Title string `json:"Title"`
+	} `json:"LastGame"`
+}
+
+func Update(cfg config.Config, snapshot *model.Wuu2) {
+	if snapshot == nil {
+		return
+	}
+	if !cfg.RetroAchievementsEnabled {
+		snapshot.RetroAchievements = nil
+		return
+	}
+
+	profile, err := fetchUserProfile(cfg)
+	if err != nil {
+		fmt.Println("RetroAchievements user profile request failed:", err)
+		return
+	}
+	if profile == nil {
+		snapshot.RetroAchievements = nil
+		return
+	}
+
+	existing := firstRetroAchievementsEntry(snapshot.RetroAchievements)
+	entry := model.RetroAchievements{
+		HardcorePoints:   profile.TotalPoints,
+		SoftcorePoints:   profile.TotalSoftcorePoints,
+		RetroPoints:      profile.TotalTruePoints,
+		LastGameID:       profile.LastGameID,
+		RichPresence:     strings.TrimSpace(profile.RichPresenceMsg),
+		CurrentlyInGame:  isCurrentlyInGame("", profile.RichPresenceMsg, profile.LastGameID),
+		ProfileAvatarURL: buildAssetURL(profile.UserPic),
+	}
+
+	if existing != nil {
+		if existing.SiteRank > 0 {
+			entry.SiteRank = existing.SiteRank
+		}
+		if existing.LastGameID == entry.LastGameID {
+			entry.LastGameTitle = existing.LastGameTitle
+		}
+	}
+
+	summary, err := fetchUserSummary(cfg)
+	if err != nil {
+		fmt.Println("RetroAchievements user summary request failed:", err)
+	} else if summary != nil {
+		if summary.Rank > 0 {
+			entry.SiteRank = summary.Rank
+		}
+		if summary.LastGame.ID > 0 {
+			entry.LastGameID = summary.LastGame.ID
+		}
+		if title := strings.TrimSpace(summary.LastGame.Title); title != "" {
+			entry.LastGameTitle = title
+		}
+		if richPresence := strings.TrimSpace(summary.RichPresenceMsg); richPresence != "" {
+			entry.RichPresence = richPresence
+		}
+		entry.CurrentlyInGame = isCurrentlyInGame(summary.Status, entry.RichPresence, entry.LastGameID)
+	}
+
+	snapshot.RetroAchievements = []model.RetroAchievements{entry}
+}
+
+func fetchUserProfile(cfg config.Config) (*userProfileResponse, error) {
+	params := url.Values{}
+	params.Set("y", strings.TrimSpace(cfg.RetroAchievementsKey))
+	params.Set("u", strings.TrimSpace(cfg.RetroAchievementsUser))
+
+	var profile userProfileResponse
+	if err := doRequest(buildRequestURL(userProfileURL, params), &profile); err != nil {
+		return nil, err
+	}
+
+	return &profile, nil
+}
+
+func fetchUserSummary(cfg config.Config) (*userSummaryResponse, error) {
+	params := url.Values{}
+	params.Set("y", strings.TrimSpace(cfg.RetroAchievementsKey))
+	params.Set("u", strings.TrimSpace(cfg.RetroAchievementsUser))
+	params.Set("g", "1")
+	params.Set("a", "0")
+
+	var summary userSummaryResponse
+	if err := doRequest(buildRequestURL(userSummaryURL, params), &summary); err != nil {
+		return nil, err
+	}
+
+	return &summary, nil
+}
+
+func doRequest(requestURL string, target any) error {
+	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func(body io.ReadCloser) {
+		_ = body.Close()
+	}(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+
+	if err := json.Unmarshal(body, target); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func buildRequestURL(base string, params url.Values) string {
+	if strings.Contains(base, "?") {
+		return base + "&" + params.Encode()
+	}
+
+	return base + "?" + params.Encode()
+}
+
+func buildAssetURL(assetPath string) string {
+	assetPath = strings.TrimSpace(assetPath)
+	if assetPath == "" {
+		return ""
+	}
+	if strings.HasPrefix(assetPath, "http://") || strings.HasPrefix(assetPath, "https://") {
+		return assetPath
+	}
+
+	return siteURL + "/" + strings.TrimPrefix(assetPath, "/")
+}
+
+func isCurrentlyInGame(status string, richPresence string, lastGameID int) bool {
+	if strings.TrimSpace(richPresence) == "" || lastGameID == 0 {
+		return false
+	}
+
+	if strings.EqualFold(strings.TrimSpace(status), "offline") {
+		return false
+	}
+
+	return true
+}
+
+func firstRetroAchievementsEntry(entries []model.RetroAchievements) *model.RetroAchievements {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	entry := entries[0]
+	return &entry
+}

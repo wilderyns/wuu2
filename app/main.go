@@ -14,6 +14,7 @@ import (
 	"wuu2/internal/config"
 	"wuu2/internal/integrations/applemusic"
 	"wuu2/internal/integrations/battle"
+	"wuu2/internal/integrations/retroachievements"
 	"wuu2/internal/integrations/steam"
 	"wuu2/internal/integrations/trakt"
 	"wuu2/internal/lib/authgate"
@@ -25,22 +26,44 @@ var serverStartTime = time.Now().UTC()
 var totalRequests uint64
 var snapshotUpdateMu sync.Mutex
 
-func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
+var retroAchievementsUpdateOffset = time.Minute
+var (
+	traktUpdateFn             = trakt.Update
+	steamUpdateFn             = steam.Update
+	appleMusicUpdateFn        = applemusic.Update
+	retroAchievementsUpdateFn = retroachievements.Update
+)
+
+func retroAchievementsUpdateInterval(base time.Duration) time.Duration {
+	return base + retroAchievementsUpdateOffset
+}
+
+func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, includeCore bool, includeRetroAchievements bool) {
 	snapshotUpdateMu.Lock()
 	defer snapshotUpdateMu.Unlock()
 
 	snapshot := store.Get()
 
-	if cfg.TraktEnabled {
-		trakt.Update(cfg, &snapshot)
+	if includeCore {
+		if cfg.TraktEnabled {
+			traktUpdateFn(cfg, &snapshot)
+		}
+
+		if cfg.BattleNetEnabled {
+			battleClient.Update(&snapshot)
+		}
+
+		steamUpdateFn(cfg, &snapshot)
+		appleMusicUpdateFn(cfg, &snapshot)
 	}
 
-	if cfg.BattleNetEnabled {
-		battleClient.Update(&snapshot)
+	if includeRetroAchievements {
+		if !cfg.RetroAchievementsEnabled {
+			snapshot.RetroAchievements = nil
+		} else {
+			retroAchievementsUpdateFn(cfg, &snapshot)
+		}
 	}
-
-	steam.Update(cfg, &snapshot)
-	applemusic.Update(cfg, &snapshot)
 
 	store.Set(snapshot)
 	if err := store.Persist(snapshot); err != nil {
@@ -49,9 +72,32 @@ func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClien
 }
 
 func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
-	getUpdates(cfg, store, battleClient)
-	for range time.Tick(cfg.UpdateIntervalMinutes) {
-		getUpdates(cfg, store, battleClient)
+	runTimedUpdater(cfg, store, battleClient, nil)
+}
+
+func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, stop <-chan struct{}) {
+	getUpdates(cfg, store, battleClient, true, true)
+
+	coreTicker := time.NewTicker(cfg.UpdateIntervalMinutes)
+	defer coreTicker.Stop()
+
+	var retroTicker *time.Ticker
+	var retroTickerCh <-chan time.Time
+	if cfg.RetroAchievementsEnabled {
+		retroTicker = time.NewTicker(retroAchievementsUpdateInterval(cfg.UpdateIntervalMinutes))
+		defer retroTicker.Stop()
+		retroTickerCh = retroTicker.C
+	}
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-coreTicker.C:
+			getUpdates(cfg, store, battleClient, true, false)
+		case <-retroTickerCh:
+			getUpdates(cfg, store, battleClient, false, true)
+		}
 	}
 }
 

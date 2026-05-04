@@ -105,7 +105,8 @@ func HasWuu2Data(snapshot model.Wuu2) bool {
 		len(snapshot.Wow) > 0 ||
 		len(snapshot.AppleMusic) > 0 ||
 		len(snapshot.Spotify) > 0 ||
-		len(snapshot.Steam) > 0
+		len(snapshot.Steam) > 0 ||
+		len(snapshot.RetroAchievements) > 0
 }
 
 func readWuu2Snapshot(path string) (model.Wuu2, error) {
@@ -149,6 +150,9 @@ func copyWuu2Snapshot(src model.Wuu2) model.Wuu2 {
 	}
 	if len(src.Steam) > 0 {
 		dst.Steam = append([]model.Steam(nil), src.Steam...)
+	}
+	if len(src.RetroAchievements) > 0 {
+		dst.RetroAchievements = append([]model.RetroAchievements(nil), src.RetroAchievements...)
 	}
 
 	return dst

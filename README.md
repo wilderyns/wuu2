@@ -9,6 +9,7 @@ A small application written in Go that uses APIs to see what you've been up to a
 - Trakt: a single last watched movie or TV show.
 - World of Warcraft: character location and coordinates, as well as avatar
 - Steam: current game, avatar, and playtime for the active title
+- RetroAchievements: points, avatar, site rank, and recent game activity
 - More integrations planned, see wiki for details
 
 ### Getting Started
