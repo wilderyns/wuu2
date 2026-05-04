@@ -20,8 +20,9 @@ type Config struct {
 	TraktEnabled bool   `env:"TRAKT_ENABLED"`
 	TraktID      string `env:"TRAKT_ID"`
 
-	BattleNetEnabled bool `env:"BATTLENET_ENABLED"`
-	SteamEnabled     bool `env:"STEAM_ENABLED"`
+	BattleNetEnabled         bool `env:"BATTLENET_ENABLED"`
+	SteamEnabled             bool `env:"STEAM_ENABLED"`
+	RetroAchievementsEnabled bool `env:"RETROACHIEVEMENTS_ENABLED"`
 
 	AuthSecurityCode string `env:"AUTH_SECURITY_CODE"`
 
@@ -38,6 +39,9 @@ type Config struct {
 
 	SteamWebAPIKey string `env:"STEAM_WEBAPI_KEY"`
 	SteamID        string `env:"STEAM_ID"`
+
+	RetroAchievementsKey  string `env:"RETROACHIEVEMENTS_KEY"`
+	RetroAchievementsUser string `env:"RETROACHIEVEMENTS_USER"`
 }
 
 func Load() Config {
@@ -93,6 +97,23 @@ func Load() Config {
 		}
 		if len(missing) > 0 {
 			log.Fatalf("STEAM_ENABLED=true requires: %s", strings.Join(missing, ", "))
+		}
+	}
+
+	if conf.RetroAchievementsEnabled {
+		required := map[string]string{
+			"RETROACHIEVEMENTS_KEY":  conf.RetroAchievementsKey,
+			"RETROACHIEVEMENTS_USER": conf.RetroAchievementsUser,
+		}
+
+		var missing []string
+		for key, value := range required {
+			if strings.TrimSpace(value) == "" {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			log.Fatalf("RETROACHIEVEMENTS_ENABLED=true requires: %s", strings.Join(missing, ", "))
 		}
 	}
 
