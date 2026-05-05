@@ -1,28 +1,37 @@
 package battle
 
 import (
-	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/endpoints"
-
 	"wuu2/internal/config"
-	"wuu2/internal/lib/oauthflow"
 	"wuu2/internal/lib/persistence"
 	"wuu2/internal/lib/timeutil"
 	"wuu2/internal/model"
 )
 
+const (
+	oauthHost       = "https://oauth.battle.net"
+	movementEpsilon = 0.001
+)
+
 var errUnauthorized = errors.New("battlenet unauthorized")
+
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+}
 
 type protectedCharacterSummary struct {
 	Character struct {
@@ -46,67 +55,78 @@ type protectedCharacterSummary struct {
 	} `json:"position"`
 }
 
+type characterMediaAsset struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 type characterMedia struct {
-	Assets []struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
-	} `json:"assets"`
+	Assets []characterMediaAsset `json:"assets"`
+}
+
+type authState struct {
+	mu           sync.Mutex
+	accessToken  string
+	refreshToken string
+	expiresAt    time.Time
+	authCode     string
+	state        string
+	startEnabled bool
 }
 
 type Client struct {
-	config   config.Config
-	oauth    *oauthflow.Manager
-	updateMu sync.Mutex
+	config             config.Config
+	auth               authState
+	updateMu           sync.Mutex
+	tokenFilePath      string
+	wowMovementHistory []model.Wow
 }
 
-// NewClient creates a Battle.net client and wires it to the shared OAuth flow manager.
 func NewClient(cfg config.Config) *Client {
-	tokenFilePath := ""
-	if cfg.TokenPersistenceEnabled {
-		tokenFilePath = persistence.TokenFilePathForDirectory(cfg.PersistenceDirectory, "battlenet")
-	}
-
-	oauthConfig := &oauth2.Config{
-		ClientID:     cfg.BattleNetClientID,
-		ClientSecret: cfg.BattleNetClientSecret,
-		RedirectURL:  cfg.BattleNetRedirectURI,
-		Scopes:       oauthflow.ParseScopes(cfg.BattleNetScope),
-		Endpoint:     endpoints.Battlenet,
-	}
-	onPersistError := func(err error) {
-		fmt.Println("Failed writing Battle.net token file:", err)
-	}
-
-	oauthManager := oauthflow.New(
-		oauthConfig,
-		16,
-		onPersistError,
-	)
-	if tokenFilePath != "" {
-		oauthManager = oauthflow.New(
-			oauthConfig,
-			16,
-			onPersistError,
-			tokenFilePath,
-		)
-	}
-
 	client := &Client{
 		config: cfg,
-		oauth:  oauthManager,
+		auth: authState{
+			startEnabled: true,
+		},
+	}
+
+	if cfg.TokenPersistenceEnabled {
+		client.tokenFilePath = persistence.TokenFilePathForDirectory(cfg.PersistenceDirectory, "battlenet")
 	}
 
 	return client
 }
 
-// LoadPersistedTokenState loads the persisted auth token state from disk and sets the client's auth state accordingly
 func (c *Client) LoadPersistedTokenState() error {
-	return c.oauth.LoadPersistedTokenState()
+	persisted, err := persistence.LoadAuthTokenState(c.tokenFilePath)
+	if err != nil {
+		return err
+	}
+
+	var parsedExpiry time.Time
+	expiresAtRaw := strings.TrimSpace(persisted.ExpiresAt)
+	if expiresAtRaw != "" {
+		parsedExpiry, err = time.Parse(time.RFC3339, expiresAtRaw)
+		if err != nil {
+			return err
+		}
+	}
+
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+
+	c.auth.accessToken = strings.TrimSpace(persisted.AccessToken)
+	c.auth.refreshToken = strings.TrimSpace(persisted.RefreshToken)
+	c.auth.expiresAt = parsedExpiry
+	c.auth.startEnabled = persisted.StartEnabled
+
+	if c.auth.accessToken == "" && c.auth.refreshToken == "" {
+		c.auth.startEnabled = true
+	}
+
+	return nil
 }
 
-// AuthStartHandler starts the Battle.net OAuth flow.
-// First uses hasConfig to ensure the user applied battle.net config is present.
-// Then
 func (c *Client) AuthStartHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !c.hasConfig() {
@@ -114,18 +134,17 @@ func (c *Client) AuthStartHandler() http.HandlerFunc {
 			return
 		}
 
-		authorizeURL, err := c.oauth.StartAuthorizationURL()
-		if errors.Is(err, oauthflow.ErrStartDisabled) {
+		if !c.isStartEnabled() {
 			http.Error(w, "Battle.net auth start is disabled until re-authentication is required", http.StatusConflict)
 			return
 		}
-		if err != nil {
-			http.Error(w, "failed preparing OAuth start", http.StatusInternalServerError)
-			fmt.Println("Battle.net OAuth start failed:", err)
-			return
-		}
 
-		http.Redirect(w, r, authorizeURL, http.StatusFound)
+		state := randomHex(16)
+		c.auth.mu.Lock()
+		c.auth.state = state
+		c.auth.mu.Unlock()
+
+		http.Redirect(w, r, c.buildAuthorizeURL(state), http.StatusFound)
 	}
 }
 
@@ -137,15 +156,17 @@ func (c *Client) AuthCallbackHandler(onAuthorizedRefresh func() error) http.Hand
 			return
 		}
 
-		err := c.oauth.ExchangeCode(r.Context(), code, r.URL.Query().Get("state"))
-		if errors.Is(err, oauthflow.ErrInvalidState) {
+		state := r.URL.Query().Get("state")
+		if !c.validateState(state) {
 			http.Error(w, "invalid OAuth state", http.StatusBadRequest)
 			return
 		}
-		if errors.Is(err, oauthflow.ErrMissingCode) {
-			http.Error(w, "missing code parameter", http.StatusBadRequest)
-			return
-		}
+
+		c.auth.mu.Lock()
+		c.auth.authCode = code
+		c.auth.mu.Unlock()
+
+		_, err := c.ensureAccessToken()
 		if err != nil {
 			http.Error(w, "failed exchanging OAuth code", http.StatusInternalServerError)
 			fmt.Println("Battle.net OAuth callback exchange failed:", err)
@@ -162,16 +183,158 @@ func (c *Client) AuthCallbackHandler(onAuthorizedRefresh func() error) http.Hand
 	}
 }
 
+func (c *Client) validateState(state string) bool {
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+
+	if c.auth.state == "" {
+		return true
+	}
+
+	if state == "" || state != c.auth.state {
+		return false
+	}
+
+	c.auth.state = ""
+	return true
+}
+
+func (c *Client) isStartEnabled() bool {
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+	return c.auth.startEnabled
+}
+
 func (c *Client) enableStart() {
-	c.oauth.EnableStart()
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+	c.auth.startEnabled = true
+	if err := c.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
 }
 
 func (c *Client) clearAccessToken() {
-	c.oauth.ClearAccessToken()
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+	c.auth.accessToken = ""
+	c.auth.expiresAt = time.Time{}
+	if err := c.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
 }
 
 func (c *Client) ensureAccessToken() (string, error) {
-	return c.oauth.EnsureAccessToken(context.Background())
+	c.auth.mu.Lock()
+	defer c.auth.mu.Unlock()
+
+	now := time.Now()
+
+	if c.auth.accessToken != "" && now.Before(c.auth.expiresAt.Add(-1*time.Minute)) {
+		return c.auth.accessToken, nil
+	}
+
+	if c.auth.refreshToken != "" {
+		token, err := c.exchangeToken(url.Values{
+			"grant_type":    {"refresh_token"},
+			"refresh_token": {c.auth.refreshToken},
+		})
+		if err == nil {
+			c.applyTokenLocked(token, now)
+			return c.auth.accessToken, nil
+		}
+		fmt.Println("Battle.net refresh failed, falling back to auth code:", err)
+	}
+
+	if c.auth.authCode == "" {
+		c.auth.startEnabled = true
+		if err := c.persistTokenStateLocked(); err != nil {
+			fmt.Println("Failed writing Battle.net token file:", err)
+		}
+		return "", fmt.Errorf("battlenet auth required: open %s", c.buildAuthorizeURL(""))
+	}
+
+	token, err := c.exchangeToken(url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {c.auth.authCode},
+		"redirect_uri": {c.config.BattleNetRedirectURI},
+	})
+	if err != nil {
+		c.auth.startEnabled = true
+		return "", err
+	}
+
+	c.auth.authCode = ""
+	c.applyTokenLocked(token, now)
+	return c.auth.accessToken, nil
+}
+
+func (c *Client) applyTokenLocked(token tokenResponse, now time.Time) {
+	c.auth.accessToken = token.AccessToken
+	if token.RefreshToken != "" {
+		c.auth.refreshToken = token.RefreshToken
+	}
+	if token.ExpiresIn > 0 {
+		c.auth.expiresAt = now.Add(time.Duration(token.ExpiresIn) * time.Second)
+	} else {
+		c.auth.expiresAt = now.Add(12 * time.Hour)
+	}
+	c.auth.startEnabled = false
+	if err := c.persistTokenStateLocked(); err != nil {
+		fmt.Println("Failed writing Battle.net token file:", err)
+	}
+}
+
+func (c *Client) persistTokenStateLocked() error {
+	persisted := persistence.AuthTokenState{
+		AccessToken:  c.auth.accessToken,
+		RefreshToken: c.auth.refreshToken,
+		StartEnabled: c.auth.startEnabled,
+	}
+	if !c.auth.expiresAt.IsZero() {
+		persisted.ExpiresAt = c.auth.expiresAt.UTC().Format(time.RFC3339)
+	}
+
+	return persistence.SaveAuthTokenState(c.tokenFilePath, persisted)
+}
+
+func (c *Client) exchangeToken(values url.Values) (tokenResponse, error) {
+	var token tokenResponse
+
+	req, err := http.NewRequest("POST", oauthHost+"/token", strings.NewReader(values.Encode()))
+	if err != nil {
+		return token, err
+	}
+
+	req.SetBasicAuth(c.config.BattleNetClientID, c.config.BattleNetClientSecret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return token, err
+	}
+	defer func(body io.ReadCloser) {
+		_ = body.Close()
+	}(resp.Body)
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return token, err
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return token, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	if err := json.Unmarshal(respBody, &token); err != nil {
+		return token, err
+	}
+
+	if token.AccessToken == "" {
+		return token, errors.New("empty access_token in battle.net response")
+	}
+
+	return token, nil
 }
 
 func (c *Client) Update(snapshot *model.Wuu2) {
@@ -235,12 +398,15 @@ func (c *Client) Update(snapshot *model.Wuu2) {
 		Z:            summary.Position.Z,
 		Facing:       summary.Position.Facing,
 	}
-	entry.AvatarURL = assetValue(media, "avatar")
-	entry.InsetURL = assetValue(media, "inset")
-	entry.MainrawURL = assetValue(media, "main-raw")
+	entry.AvatarURL = assetValue(media.Assets, "avatar")
+	entry.InsetURL = assetValue(media.Assets, "inset")
+	entry.MainrawURL = assetValue(media.Assets, "main-raw")
 	entry.ArmoryURL = c.buildWowArmoryURL(summary)
-	entry.Online = false
-	entry.LastOnline = ""
+	entry.Online = hasWowCharacterMoved(c.wowMovementHistory, entry, now, c.config.UpdateIntervalMinutes)
+	entry.LastOnline = resolveWowLastOnline(c.wowMovementHistory, entry)
+
+	c.wowMovementHistory = append(c.wowMovementHistory, entry)
+	c.wowMovementHistory = trimWowMovementHistory(c.wowMovementHistory, 512)
 
 	snapshot.Wow = []model.Wow{entry}
 }
@@ -370,8 +536,8 @@ func (c *Client) fetchCharacterMedia(accessToken string, summary protectedCharac
 	return media, nil
 }
 
-func assetValue(media characterMedia, key string) string {
-	for _, asset := range media.Assets {
+func assetValue(assets []characterMediaAsset, key string) string {
+	for _, asset := range assets {
 		if strings.EqualFold(strings.TrimSpace(asset.Key), key) {
 			return strings.TrimSpace(asset.Value)
 		}
@@ -420,6 +586,90 @@ func normalizeWowArmoryLocale(rawLocale string, region string) string {
 	}
 }
 
+func (c *Client) buildAuthorizeURL(state string) string {
+	query := url.Values{}
+	query.Set("response_type", "code")
+	query.Set("client_id", c.config.BattleNetClientID)
+	query.Set("scope", c.config.BattleNetScope)
+	query.Set("redirect_uri", c.config.BattleNetRedirectURI)
+	if state != "" {
+		query.Set("state", state)
+	}
+
+	return oauthHost + "/authorize?" + query.Encode()
+}
+
+func hasWowCharacterMoved(history []model.Wow, current model.Wow, now time.Time, lookback time.Duration) bool {
+	if len(history) == 0 {
+		return false
+	}
+
+	referenceIndex := -1
+	fallbackIndex := -1
+	cutoff := now.Add(-lookback)
+
+	for i := len(history) - 1; i >= 0; i-- {
+		existing := history[i]
+		if !sameWowCharacter(existing, current) {
+			continue
+		}
+
+		if fallbackIndex == -1 {
+			fallbackIndex = i
+		}
+
+		lastCheck, err := time.Parse(time.RFC3339, existing.LastCheck)
+		if err != nil {
+			continue
+		}
+
+		if !lastCheck.After(cutoff) {
+			referenceIndex = i
+			break
+		}
+	}
+
+	if referenceIndex == -1 {
+		referenceIndex = fallbackIndex
+	}
+	if referenceIndex == -1 {
+		return false
+	}
+
+	ref := history[referenceIndex]
+	return math.Abs(float64(current.X-ref.X)) > movementEpsilon ||
+		math.Abs(float64(current.Y-ref.Y)) > movementEpsilon ||
+		math.Abs(float64(current.Z-ref.Z)) > movementEpsilon
+}
+
+func sameWowCharacter(a model.Wow, b model.Wow) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Character), strings.TrimSpace(b.Character)) &&
+		strings.EqualFold(strings.TrimSpace(a.Realm), strings.TrimSpace(b.Realm))
+}
+
+func resolveWowLastOnline(history []model.Wow, current model.Wow) string {
+	if current.Online {
+		return current.LastCheck
+	}
+
+	for i := len(history) - 1; i >= 0; i-- {
+		existing := history[i]
+		if !sameWowCharacter(existing, current) {
+			continue
+		}
+
+		lastOnline := strings.TrimSpace(existing.LastOnline)
+		if lastOnline != "" {
+			return lastOnline
+		}
+		if existing.Online {
+			return existing.LastCheck
+		}
+	}
+
+	return ""
+}
+
 func formatWowLocation(summary protectedCharacterSummary) string {
 	zone := strings.TrimSpace(summary.Position.Zone.Name)
 	mapName := strings.TrimSpace(summary.Position.Map.Name)
@@ -444,6 +694,14 @@ func (c *Client) hasConfig() bool {
 		c.config.BattleNetScope != ""
 }
 
+func randomHex(size int) string {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
+}
+
 func nonEmpty(values ...string) string {
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
@@ -452,4 +710,11 @@ func nonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func trimWowMovementHistory(history []model.Wow, maxItems int) []model.Wow {
+	if maxItems <= 0 || len(history) <= maxItems {
+		return history
+	}
+	return history[len(history)-maxItems:]
 }

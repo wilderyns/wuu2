@@ -14,6 +14,7 @@ import (
 	"wuu2/internal/config"
 	"wuu2/internal/integrations/applemusic"
 	"wuu2/internal/integrations/battle"
+	"wuu2/internal/integrations/retroachievements"
 	"wuu2/internal/integrations/steam"
 	"wuu2/internal/integrations/trakt"
 	"wuu2/internal/lib/authgate"
@@ -25,22 +26,39 @@ var serverStartTime = time.Now().UTC()
 var totalRequests uint64
 var snapshotUpdateMu sync.Mutex
 
-func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
+var (
+	traktUpdateFn      = trakt.Update
+	steamUpdateFn      = steam.Update
+	appleMusicUpdateFn = func(client *applemusic.Client, snapshot *model.Wuu2) {
+		if client != nil {
+			client.Update(snapshot)
+		}
+	}
+	retroAchievementsUpdateFn = retroachievements.Update
+)
+
+func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client) {
 	snapshotUpdateMu.Lock()
 	defer snapshotUpdateMu.Unlock()
 
 	snapshot := store.Get()
 
 	if cfg.TraktEnabled {
-		trakt.Update(cfg, &snapshot)
+		traktUpdateFn(cfg, &snapshot)
 	}
 
 	if cfg.BattleNetEnabled {
 		battleClient.Update(&snapshot)
 	}
 
-	steam.Update(cfg, &snapshot)
-	applemusic.Update(cfg, &snapshot)
+	steamUpdateFn(cfg, &snapshot)
+	appleMusicUpdateFn(appleMusicClient, &snapshot)
+
+	if !cfg.RetroAchievementsEnabled {
+		snapshot.RetroAchievements = nil
+	} else {
+		retroAchievementsUpdateFn(cfg, &snapshot)
+	}
 
 	store.Set(snapshot)
 	if err := store.Persist(snapshot); err != nil {
@@ -48,10 +66,23 @@ func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClien
 	}
 }
 
-func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
-	getUpdates(cfg, store, battleClient)
-	for range time.Tick(cfg.UpdateIntervalMinutes) {
-		getUpdates(cfg, store, battleClient)
+func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client) {
+	runTimedUpdater(cfg, store, battleClient, appleMusicClient, nil)
+}
+
+func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client, stop <-chan struct{}) {
+	getUpdates(cfg, store, battleClient, appleMusicClient)
+
+	coreTicker := time.NewTicker(cfg.UpdateIntervalMinutes)
+	defer coreTicker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-coreTicker.C:
+			getUpdates(cfg, store, battleClient, appleMusicClient)
+		}
 	}
 }
 
@@ -145,34 +176,30 @@ func parseAllowedOrigins(raw string) map[string]struct{} {
 }
 
 func main() {
-	// Load config
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
-	cfg := config.Load()
 
-	// Decide if we're using on disk persistence
-	if cfg.PersistenceDirectory == "" {
-		log.Println("No persistence directory specified, using in-memory persistence")
-	} else {
-		log.Printf("Using persistence directory: %s", cfg.PersistenceDirectory)
-	}
+	cfg := config.Load()
 	store := persistence.NewSnapshotStore(persistence.SnapshotFilePathForDirectory(cfg.PersistenceDirectory))
 	if err := store.EnsureLoadedFromDisk(); err != nil {
 		log.Printf("Failed loading snapshot file: %v", err)
 	}
 
-	// Handle auth token persistence loading
-	// Battle.net: determine existing auth token
 	battleClient := battle.NewClient(cfg)
-	if cfg.BattleNetEnabled && cfg.PersistenceDirectory != "" {
+	if cfg.BattleNetEnabled {
 		if err := battleClient.LoadPersistedTokenState(); err != nil {
-			//TODO: Specify only to show an error if we've previously set a persistence token maybe
 			log.Printf("Failed loading Battle.net token file: %v", err)
 		}
 	}
 
-	// Load pers
+	appleMusicClient := applemusic.NewClient(cfg)
+	if cfg.AppleMusicEnabled {
+		if err := appleMusicClient.LoadPersistedTokenState(); err != nil {
+			log.Printf("Failed loading Apple Music token file: %v", err)
+		}
+	}
+
 	refreshBattleAndPersist := func() error {
 		snapshotUpdateMu.Lock()
 		defer snapshotUpdateMu.Unlock()
@@ -183,15 +210,29 @@ func main() {
 		return store.Persist(snapshot)
 	}
 
+	refreshAppleMusicAndPersist := func() error {
+		snapshotUpdateMu.Lock()
+		defer snapshotUpdateMu.Unlock()
+
+		snapshot := store.Get()
+		appleMusicClient.Update(&snapshot)
+		store.Set(snapshot)
+		return store.Persist(snapshot)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler(store))
 	if cfg.BattleNetEnabled {
 		mux.HandleFunc("/auth/battlenet/start", authgate.WithSecurityGate(cfg.AuthSecurityCode, "Battle.net OAuth", battleClient.AuthStartHandler()))
 		mux.HandleFunc("/auth/battlenet/callback", battleClient.AuthCallbackHandler(refreshBattleAndPersist))
 	}
+	if cfg.AppleMusicEnabled {
+		mux.HandleFunc("/auth/applemusic/start", authgate.WithSecurityGate(cfg.AuthSecurityCode, "Apple Music authorization", appleMusicClient.AuthStartHandler()))
+		mux.HandleFunc("/auth/applemusic/callback", appleMusicClient.AuthCallbackHandler(refreshAppleMusicAndPersist))
+	}
 
 	serverHandler := withRequestMetrics(withCORS(cfg, mux))
-	go timedUpdater(cfg, store, battleClient)
+	go timedUpdater(cfg, store, battleClient, appleMusicClient)
 	log.Printf("Listening on %s", cfg.Address)
 	log.Fatal(http.ListenAndServe(cfg.Address, serverHandler))
 }

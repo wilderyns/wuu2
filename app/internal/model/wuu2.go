@@ -48,23 +48,39 @@ type Spotify struct {
 }
 
 type Steam struct {
-	LastChange  string
-	Game        string
-	GameLink    string
-	AvatarURL   string
-	HoursPlayed int
+	CurrentlyInGame    bool
+	LastChange         string
+	GameName           string
+	GameURL            string
+	ProfileAvatarURL   string
+	HoursPlayed        int
+	EarnedAchievements int
+	TotalAchievements  int
+}
+
+type RetroAchievements struct {
+	LastChange       string
+	HardcorePoints   int
+	SoftcorePoints   int
+	RetroPoints      int
+	LastGameID       int
+	LastGameTitle    string
+	CurrentlyInGame  bool
+	RichPresence     string
+	ProfileAvatarURL string
+	SiteRank         int
 }
 
 type Information struct {
-	Version         string `json:"version"`
 	TotalRequests   uint64 `json:"totalRequests"`
 	ServerStartTime string `json:"serverStartTime"`
 }
 
 type Wuu2 struct {
-	Trakt      []Trakt
-	Wow        []Wow
-	AppleMusic []AppleMusic
-	Spotify    []Spotify
-	Steam      []Steam
+	Trakt             []Trakt
+	Wow               []Wow
+	AppleMusic        []AppleMusic
+	Spotify           []Spotify
+	Steam             []Steam
+	RetroAchievements []RetroAchievements
 }
