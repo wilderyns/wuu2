@@ -1,6 +1,8 @@
 .git
 .idea
 .env
+tokens
+*.p8
 wuu2
 *.log
 tmp

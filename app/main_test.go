@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"wuu2/internal/config"
+	"wuu2/internal/integrations/applemusic"
 	"wuu2/internal/lib/persistence"
 	"wuu2/internal/model"
 )
@@ -37,7 +38,7 @@ func TestRunTimedUpdaterSchedulesRetroAchievementsIndependently(t *testing.T) {
 	startedAt := time.Now()
 
 	steamUpdateFn = func(_ config.Config, _ *model.Wuu2) {}
-	appleMusicUpdateFn = func(_ config.Config, _ *model.Wuu2) {}
+	appleMusicUpdateFn = func(_ *applemusic.Client, _ *model.Wuu2) {}
 	retroAchievementsUpdateFn = func(_ config.Config, _ *model.Wuu2) {
 		runCount := retroRuns.Add(1)
 		if runCount == 2 {
@@ -58,7 +59,7 @@ func TestRunTimedUpdaterSchedulesRetroAchievementsIndependently(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		runTimedUpdater(cfg, store, nil, stop)
+		runTimedUpdater(cfg, store, nil, nil, stop)
 		close(done)
 	}()
 
