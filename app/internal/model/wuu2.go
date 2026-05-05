@@ -61,17 +61,22 @@ type Steam struct {
 }
 
 type RetroAchievements struct {
-	LastChange       string
-	HardcorePoints   int
-	SoftcorePoints   int
-	RetroPoints      int
-	LastGameID       int
-	LastGameTitle    string
-	GameIconURL      string
-	CurrentlyInGame  bool
-	RichPresence     string
-	ProfileAvatarURL string
-	SiteRank         int
+	LastChange         string
+	HardcorePoints     int
+	SoftcorePoints     int
+	RetroPoints        int
+	LastGameID         int
+	LastGameTitle      string
+	GameIconURL        string
+	CurrentlyInGame    bool
+	RichPresence       string
+	ProfileAvatarURL   string
+	SiteRank           int
+	EarnedAchievements int
+	TotalAchievements  int
+	Beaten             bool
+	Mastered           bool
+	PlaytimeMinutes    int
 }
 
 type Information struct {

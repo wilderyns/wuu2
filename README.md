@@ -8,9 +8,9 @@ A small application written in Go that uses APIs to see what you've been up to a
 
 - Trakt: a single last watched movie or TV show.
 - Apple Music: the currently or most recently played song
-- World of Warcraft: character location and coordinates, as well as avatar
+- Battle.net (World of Warcraft): character location and coordinates, as well as avatar
 - Steam: current game, avatar, and playtime for the active title
-- RetroAchievements: points, avatar, site rank, and recent game activity
+- RetroAchievements: points, avatar, site rank, recent game activity, and per-game progress
 - More integrations planned, see wiki for details
 
 ### Getting Started
@@ -31,7 +31,7 @@ Full configuration steps including a complete explanation of each environment va
 ### Caveats
 
 #### Apple Music
-Apple Music requires both a browser-based user authorization and a developer token signed with your MusicKit `.p8` private key. Keep that key out of git and out of container images.
+Apple Music requires both a browser-based user authorization and a developer token signed with your MusicKit `.p8` private key. Requires a paid Apple Developer subscription.
 
 #### World of Warcraft
 Although the intention was to use character coordinates to determine online status, the protected character API only updates when a player logs out. Keys supporting online and last online status are still included and updated, however they are in no way reliable. 

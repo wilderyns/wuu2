@@ -17,9 +17,10 @@ const siteURL = "https://retroachievements.org"
 const userAgent = "wuu2/1.0 (+https://github.com/wilderyns/wuu2)"
 
 var (
-	httpClient     = http.DefaultClient
-	userProfileURL = siteURL + "/API/API_GetUserProfile.php"
-	userSummaryURL = siteURL + "/API/API_GetUserSummary.php"
+	httpClient          = http.DefaultClient
+	userProfileURL      = siteURL + "/API/API_GetUserProfile.php"
+	userSummaryURL      = siteURL + "/API/API_GetUserSummary.php"
+	userGameProgressURL = siteURL + "/API/API_GetGameInfoAndUserProgress.php"
 )
 
 type userProfileResponse struct {
@@ -48,6 +49,15 @@ type userSummaryResponse struct {
 		Title     string `json:"Title"`
 		ImageIcon string `json:"ImageIcon"`
 	} `json:"LastGame"`
+}
+
+type userGameProgressResponse struct {
+	ID                int    `json:"ID"`
+	Title             string `json:"Title"`
+	NumAchievements   int    `json:"NumAchievements"`
+	NumAwardedToUser  int    `json:"NumAwardedToUser"`
+	UserTotalPlaytime int    `json:"UserTotalPlaytime"`
+	HighestAwardKind  string `json:"HighestAwardKind"`
 }
 
 func Update(cfg config.Config, snapshot *model.Wuu2) {
@@ -90,6 +100,13 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		if existing.LastChange != "" {
 			entry.LastChange = existing.LastChange
 		}
+		if existing.LastGameID == entry.LastGameID {
+			entry.EarnedAchievements = existing.EarnedAchievements
+			entry.TotalAchievements = existing.TotalAchievements
+			entry.Beaten = existing.Beaten
+			entry.Mastered = existing.Mastered
+			entry.PlaytimeMinutes = existing.PlaytimeMinutes
+		}
 	}
 
 	summary, err := fetchUserSummary(cfg)
@@ -128,6 +145,22 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		entry.CurrentlyInGame = isCurrentlyInGame(summary.Status, entry.RichPresence, entry.LastGameID)
 	}
 
+	if entry.LastGameID > 0 {
+		progress, err := fetchUserGameProgress(cfg, entry.LastGameID)
+		if err != nil {
+			fmt.Println("RetroAchievements user game progress request failed:", err)
+		} else if progress != nil {
+			entry.EarnedAchievements = progress.NumAwardedToUser
+			entry.TotalAchievements = progress.NumAchievements
+			entry.PlaytimeMinutes = progress.UserTotalPlaytime
+			entry.Mastered = isMastered(progress.HighestAwardKind)
+			entry.Beaten = isBeaten(progress.HighestAwardKind)
+			if title := strings.TrimSpace(progress.Title); title != "" {
+				entry.LastGameTitle = title
+			}
+		}
+	}
+
 	snapshot.RetroAchievements = []model.RetroAchievements{entry}
 }
 
@@ -157,6 +190,20 @@ func fetchUserSummary(cfg config.Config) (*userSummaryResponse, error) {
 	}
 
 	return &summary, nil
+}
+
+func fetchUserGameProgress(cfg config.Config, gameID int) (*userGameProgressResponse, error) {
+	params := url.Values{}
+	params.Set("y", strings.TrimSpace(cfg.RetroAchievementsKey))
+	params.Set("u", strings.TrimSpace(cfg.RetroAchievementsUser))
+	params.Set("g", fmt.Sprintf("%d", gameID))
+
+	var progress userGameProgressResponse
+	if err := doRequest(buildRequestURL(userGameProgressURL, params), &progress); err != nil {
+		return nil, err
+	}
+
+	return &progress, nil
 }
 
 func doRequest(requestURL string, target any) error {
@@ -220,6 +267,19 @@ func isCurrentlyInGame(status string, richPresence string, lastGameID int) bool 
 	}
 
 	return true
+}
+
+func isBeaten(highestAwardKind string) bool {
+	switch strings.ToLower(strings.TrimSpace(highestAwardKind)) {
+	case "beaten-softcore", "beaten-hardcore", "completed", "mastered":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMastered(highestAwardKind string) bool {
+	return strings.EqualFold(strings.TrimSpace(highestAwardKind), "mastered")
 }
 
 func firstRetroAchievementsEntry(entries []model.RetroAchievements) *model.RetroAchievements {

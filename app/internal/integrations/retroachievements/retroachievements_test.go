@@ -37,13 +37,18 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 				t.Fatalf("unexpected recent achievements query: %q", got)
 			}
 			_, _ = w.Write([]byte(`{"Rank":512,"Status":"Online","RichPresenceMsg":"Playing Super Metroid","RecentlyPlayed":[{"GameID":42,"Title":"Super Metroid","LastPlayed":"2026-05-04 21:54:54","ImageIcon":"/Images/000042.png"}],"LastGame":{"ID":42,"Title":"Super Metroid","ImageIcon":"/Images/lastgame.png"}}`))
+		case "/progress":
+			if got := r.URL.Query().Get("g"); got != "42" {
+				t.Fatalf("unexpected game id query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"ID":42,"Title":"Super Metroid","NumAchievements":33,"NumAwardedToUser":21,"UserTotalPlaytime":645,"HighestAwardKind":"beaten-hardcore"}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	restore := stubRetroAchievementsAPI(server.URL+"/profile", server.URL+"/summary")
+	restore := stubRetroAchievementsAPI(server.URL+"/profile", server.URL+"/summary", server.URL+"/progress")
 	defer restore()
 
 	snapshot := model.Wuu2{}
@@ -91,6 +96,18 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 	if entry.SiteRank != 512 {
 		t.Fatalf("unexpected site rank: %d", entry.SiteRank)
 	}
+	if entry.EarnedAchievements != 21 || entry.TotalAchievements != 33 {
+		t.Fatalf("unexpected achievement counts: %d/%d", entry.EarnedAchievements, entry.TotalAchievements)
+	}
+	if !entry.Beaten {
+		t.Fatal("expected beaten to be true")
+	}
+	if entry.Mastered {
+		t.Fatal("expected mastered to be false")
+	}
+	if entry.PlaytimeMinutes != 645 {
+		t.Fatalf("unexpected playtime minutes: %d", entry.PlaytimeMinutes)
+	}
 }
 
 func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
@@ -109,23 +126,30 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 			_, _ = w.Write([]byte(`{"User":"wilderyns","ULID":"01","UserPic":"/UserPic/wilderyns.png","RichPresenceMsg":"","LastGameID":84,"TotalPoints":1500,"TotalSoftcorePoints":1700,"TotalTruePoints":4200}`))
 		case "/summary":
 			http.Error(w, "unavailable", http.StatusBadGateway)
+		case "/progress":
+			http.Error(w, "unavailable", http.StatusBadGateway)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	restore := stubRetroAchievementsAPI(server.URL+"/profile", server.URL+"/summary")
+	restore := stubRetroAchievementsAPI(server.URL+"/profile", server.URL+"/summary", server.URL+"/progress")
 	defer restore()
 
 	snapshot := model.Wuu2{
 		RetroAchievements: []model.RetroAchievements{{
-			LastChange:       "2026-05-01T12:00:00Z",
-			LastGameID:       84,
-			LastGameTitle:    "Chrono Trigger",
-			SiteRank:         321,
-			CurrentlyInGame:  true,
-			ProfileAvatarURL: "https://retroachievements.org/UserPic/old.png",
+			LastChange:         "2026-05-01T12:00:00Z",
+			LastGameID:         84,
+			LastGameTitle:      "Chrono Trigger",
+			SiteRank:           321,
+			CurrentlyInGame:    true,
+			ProfileAvatarURL:   "https://retroachievements.org/UserPic/old.png",
+			EarnedAchievements: 18,
+			TotalAchievements:  24,
+			Beaten:             true,
+			Mastered:           false,
+			PlaytimeMinutes:    320,
 		}},
 	}
 
@@ -148,20 +172,35 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 	if entry.CurrentlyInGame {
 		t.Fatal("expected empty presence to mark user out of game")
 	}
+	if entry.EarnedAchievements != 18 || entry.TotalAchievements != 24 {
+		t.Fatalf("expected preserved achievement counts, got %d/%d", entry.EarnedAchievements, entry.TotalAchievements)
+	}
+	if !entry.Beaten {
+		t.Fatal("expected beaten to be preserved")
+	}
+	if entry.Mastered {
+		t.Fatal("expected mastered to remain false")
+	}
+	if entry.PlaytimeMinutes != 320 {
+		t.Fatalf("expected preserved playtime minutes, got %d", entry.PlaytimeMinutes)
+	}
 }
 
-func stubRetroAchievementsAPI(profileURL string, summaryURL string) func() {
+func stubRetroAchievementsAPI(profileURL string, summaryURL string, progressURL string) func() {
 	previousProfileURL := userProfileURL
 	previousSummaryURL := userSummaryURL
+	previousProgressURL := userGameProgressURL
 	previousHTTPClient := httpClient
 
 	userProfileURL = profileURL
 	userSummaryURL = summaryURL
+	userGameProgressURL = progressURL
 	httpClient = http.DefaultClient
 
 	return func() {
 		userProfileURL = previousProfileURL
 		userSummaryURL = previousSummaryURL
+		userGameProgressURL = previousProgressURL
 		httpClient = previousHTTPClient
 	}
 }
