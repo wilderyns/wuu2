@@ -7,6 +7,7 @@ _________
 A small application written in Go that uses APIs to see what you've been up to across TV, music, and games, returning it as a nicely accessible JSON.
 
 - Trakt: a single last watched movie or TV show.
+- Apple Music: the currently or most recently played song
 - World of Warcraft: character location and coordinates, as well as avatar
 - Steam: current game, avatar, and playtime for the active title
 - RetroAchievements: points, avatar, site rank, and recent game activity
@@ -28,6 +29,9 @@ go run .
 Full configuration steps including a complete explanation of each environment variable and setting up API access with the various providers is [available in the wiki](https://github.com/wilderyns/wuu2/wiki/Environment-Variables)
 
 ### Caveats
+
+#### Apple Music
+Apple Music requires both a browser-based user authorization and a developer token signed with your MusicKit `.p8` private key. Keep that key out of git and out of container images.
 
 #### World of Warcraft
 Although the intention was to use character coordinates to determine online status, the protected character API only updates when a player logs out. Keys supporting online and last online status are still included and updated, however they are in no way reliable. 

@@ -28,9 +28,13 @@ var snapshotUpdateMu sync.Mutex
 
 var retroAchievementsUpdateOffset = time.Minute
 var (
-	traktUpdateFn             = trakt.Update
-	steamUpdateFn             = steam.Update
-	appleMusicUpdateFn        = applemusic.Update
+	traktUpdateFn      = trakt.Update
+	steamUpdateFn      = steam.Update
+	appleMusicUpdateFn = func(client *applemusic.Client, snapshot *model.Wuu2) {
+		if client != nil {
+			client.Update(snapshot)
+		}
+	}
 	retroAchievementsUpdateFn = retroachievements.Update
 )
 
@@ -38,7 +42,7 @@ func retroAchievementsUpdateInterval(base time.Duration) time.Duration {
 	return base + retroAchievementsUpdateOffset
 }
 
-func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, includeCore bool, includeRetroAchievements bool) {
+func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client, includeCore bool, includeRetroAchievements bool) {
 	snapshotUpdateMu.Lock()
 	defer snapshotUpdateMu.Unlock()
 
@@ -54,7 +58,7 @@ func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClien
 		}
 
 		steamUpdateFn(cfg, &snapshot)
-		appleMusicUpdateFn(cfg, &snapshot)
+		appleMusicUpdateFn(appleMusicClient, &snapshot)
 	}
 
 	if includeRetroAchievements {
@@ -71,12 +75,12 @@ func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClien
 	}
 }
 
-func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client) {
-	runTimedUpdater(cfg, store, battleClient, nil)
+func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client) {
+	runTimedUpdater(cfg, store, battleClient, appleMusicClient, nil)
 }
 
-func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, stop <-chan struct{}) {
-	getUpdates(cfg, store, battleClient, true, true)
+func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client, stop <-chan struct{}) {
+	getUpdates(cfg, store, battleClient, appleMusicClient, true, true)
 
 	coreTicker := time.NewTicker(cfg.UpdateIntervalMinutes)
 	defer coreTicker.Stop()
@@ -94,9 +98,9 @@ func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battle
 		case <-stop:
 			return
 		case <-coreTicker.C:
-			getUpdates(cfg, store, battleClient, true, false)
+			getUpdates(cfg, store, battleClient, appleMusicClient, true, false)
 		case <-retroTickerCh:
-			getUpdates(cfg, store, battleClient, false, true)
+			getUpdates(cfg, store, battleClient, appleMusicClient, false, true)
 		}
 	}
 }
@@ -208,6 +212,13 @@ func main() {
 		}
 	}
 
+	appleMusicClient := applemusic.NewClient(cfg)
+	if cfg.AppleMusicEnabled {
+		if err := appleMusicClient.LoadPersistedTokenState(); err != nil {
+			log.Printf("Failed loading Apple Music token file: %v", err)
+		}
+	}
+
 	refreshBattleAndPersist := func() error {
 		snapshotUpdateMu.Lock()
 		defer snapshotUpdateMu.Unlock()
@@ -218,15 +229,29 @@ func main() {
 		return store.Persist(snapshot)
 	}
 
+	refreshAppleMusicAndPersist := func() error {
+		snapshotUpdateMu.Lock()
+		defer snapshotUpdateMu.Unlock()
+
+		snapshot := store.Get()
+		appleMusicClient.Update(&snapshot)
+		store.Set(snapshot)
+		return store.Persist(snapshot)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler(store))
 	if cfg.BattleNetEnabled {
 		mux.HandleFunc("/auth/battlenet/start", authgate.WithSecurityGate(cfg.AuthSecurityCode, "Battle.net OAuth", battleClient.AuthStartHandler()))
 		mux.HandleFunc("/auth/battlenet/callback", battleClient.AuthCallbackHandler(refreshBattleAndPersist))
 	}
+	if cfg.AppleMusicEnabled {
+		mux.HandleFunc("/auth/applemusic/start", authgate.WithSecurityGate(cfg.AuthSecurityCode, "Apple Music authorization", appleMusicClient.AuthStartHandler()))
+		mux.HandleFunc("/auth/applemusic/callback", appleMusicClient.AuthCallbackHandler(refreshAppleMusicAndPersist))
+	}
 
 	serverHandler := withRequestMetrics(withCORS(cfg, mux))
-	go timedUpdater(cfg, store, battleClient)
+	go timedUpdater(cfg, store, battleClient, appleMusicClient)
 	log.Printf("Listening on %s", cfg.Address)
 	log.Fatal(http.ListenAndServe(cfg.Address, serverHandler))
 }

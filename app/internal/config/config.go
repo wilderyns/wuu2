@@ -21,6 +21,7 @@ type Config struct {
 	TraktID      string `env:"TRAKT_ID"`
 
 	BattleNetEnabled         bool `env:"BATTLENET_ENABLED"`
+	AppleMusicEnabled        bool `env:"APPLEMUSIC_ENABLED"`
 	SteamEnabled             bool `env:"STEAM_ENABLED"`
 	RetroAchievementsEnabled bool `env:"RETROACHIEVEMENTS_ENABLED"`
 
@@ -36,6 +37,11 @@ type Config struct {
 	BattleNetRegion       string `env:"BATTLENET_REGION"`
 	BattleNetRedirectURI  string `env:"BATTLENET_REDIRECT_URI"`
 	BattleNetScope        string `env:"BATTLENET_SCOPE"`
+
+	AppleMusicDeveloperToken string `env:"APPLEMUSIC_DEVELOPER_TOKEN"`
+	AppleMusicTeamID         string `env:"APPLEMUSIC_TEAM_ID"`
+	AppleMusicKeyID          string `env:"APPLEMUSIC_KEY_ID"`
+	AppleMusicPrivateKeyPath string `env:"APPLEMUSIC_PRIVATE_KEY_PATH" envDefault:"tokens"`
 
 	SteamWebAPIKey string `env:"STEAM_WEBAPI_KEY"`
 	SteamID        string `env:"STEAM_ID"`
@@ -81,6 +87,12 @@ func Load() Config {
 		if len(missing) > 0 {
 			log.Fatalf("BATTLENET_ENABLED=true requires: %s", strings.Join(missing, ", "))
 		}
+	}
+
+	if conf.AppleMusicEnabled &&
+		strings.TrimSpace(conf.AppleMusicDeveloperToken) == "" &&
+		strings.TrimSpace(conf.AppleMusicTeamID) == "" {
+		log.Fatal("APPLEMUSIC_ENABLED=true requires APPLEMUSIC_DEVELOPER_TOKEN or APPLEMUSIC_TEAM_ID with a local .p8 key")
 	}
 
 	if conf.SteamEnabled {
