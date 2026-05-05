@@ -41,10 +41,12 @@ type userSummaryResponse struct {
 		GameID     int    `json:"GameID"`
 		Title      string `json:"Title"`
 		LastPlayed string `json:"LastPlayed"`
+		ImageIcon  string `json:"ImageIcon"`
 	} `json:"RecentlyPlayed"`
 	LastGame struct {
-		ID    int    `json:"ID"`
-		Title string `json:"Title"`
+		ID        int    `json:"ID"`
+		Title     string `json:"Title"`
+		ImageIcon string `json:"ImageIcon"`
 	} `json:"LastGame"`
 }
 
@@ -103,12 +105,18 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		if title := strings.TrimSpace(summary.LastGame.Title); title != "" {
 			entry.LastGameTitle = title
 		}
+		if icon := buildAssetURL(summary.LastGame.ImageIcon); icon != "" {
+			entry.GameIconURL = icon
+		}
 		if len(summary.RecentlyPlayed) > 0 {
 			if title := strings.TrimSpace(summary.RecentlyPlayed[0].Title); title != "" {
 				entry.LastGameTitle = title
 			}
 			if summary.RecentlyPlayed[0].GameID > 0 {
 				entry.LastGameID = summary.RecentlyPlayed[0].GameID
+			}
+			if icon := buildAssetURL(summary.RecentlyPlayed[0].ImageIcon); icon != "" {
+				entry.GameIconURL = icon
 			}
 			if lastChange := normalizeRetroAchievementsTime(summary.RecentlyPlayed[0].LastPlayed); lastChange != "" {
 				entry.LastChange = lastChange

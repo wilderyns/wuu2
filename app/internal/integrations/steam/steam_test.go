@@ -27,7 +27,7 @@ func TestUpdateSetsCurrentGameDetails(t *testing.T) {
 			if got := r.URL.Query().Get("appids_filter[0]"); got != "620" {
 				t.Fatalf("unexpected appids_filter query: %q", got)
 			}
-			_, _ = w.Write([]byte(`{"response":{"game_count":1,"games":[{"appid":620,"name":"Portal 2","playtime_forever":570}]}}`))
+			_, _ = w.Write([]byte(`{"response":{"game_count":1,"games":[{"appid":620,"name":"Portal 2","img_icon_url":"iconhash620","playtime_forever":570}]}}`))
 		case "/achievements":
 			achievementsRequested = true
 			if got := r.URL.Query().Get("appid"); got != "620" {
@@ -70,6 +70,9 @@ func TestUpdateSetsCurrentGameDetails(t *testing.T) {
 	if entry.GameURL != "https://store.steampowered.com/app/620/" {
 		t.Fatalf("unexpected game url: %q", entry.GameURL)
 	}
+	if entry.GameIconURL != "https://media.steampowered.com/steamcommunity/public/images/apps/620/iconhash620.jpg" {
+		t.Fatalf("unexpected game icon url: %q", entry.GameIconURL)
+	}
 	if entry.ProfileAvatarURL != "https://cdn.example/avatar.jpg" {
 		t.Fatalf("unexpected avatar url: %q", entry.ProfileAvatarURL)
 	}
@@ -92,7 +95,7 @@ func TestUpdatePreservesLastChangeWhenGameIsUnchanged(t *testing.T) {
 		case "/summary":
 			_, _ = w.Write([]byte(`{"response":{"players":[{"steamid":"76561198000000000","avatarfull":"https://cdn.example/avatar.jpg","gameid":"620","gameextrainfo":"Portal 2","lastlogoff":1710000000}]}}`))
 		case "/owned":
-			_, _ = w.Write([]byte(`{"response":{"game_count":1,"games":[{"appid":620,"name":"Portal 2","playtime_forever":630}]}}`))
+			_, _ = w.Write([]byte(`{"response":{"game_count":1,"games":[{"appid":620,"name":"Portal 2","img_icon_url":"iconhash620","playtime_forever":630}]}}`))
 		case "/achievements":
 			_, _ = w.Write([]byte(`{"playerstats":{"gameName":"Portal 2","success":true,"achievements":[{"achieved":1},{"achieved":1},{"achieved":0},{"achieved":0}]}}`))
 		default:
@@ -136,6 +139,9 @@ func TestUpdatePreservesLastChangeWhenGameIsUnchanged(t *testing.T) {
 	if entry.ProfileAvatarURL != "https://cdn.example/avatar.jpg" {
 		t.Fatalf("expected avatar url to refresh, got %q", entry.ProfileAvatarURL)
 	}
+	if entry.GameIconURL != "https://media.steampowered.com/steamcommunity/public/images/apps/620/iconhash620.jpg" {
+		t.Fatalf("unexpected game icon url: %q", entry.GameIconURL)
+	}
 }
 
 func TestUpdateUsesLastLogoffWhenOffline(t *testing.T) {
@@ -151,7 +157,7 @@ func TestUpdateUsesLastLogoffWhenOffline(t *testing.T) {
 			if got := r.URL.Query().Get("appids_filter[0]"); got != "" {
 				t.Fatalf("did not expect filtered owned games query, got %q", got)
 			}
-			_, _ = w.Write([]byte(`{"response":{"game_count":3,"games":[{"appid":620,"name":"Portal 2","playtime_forever":570,"rtime_last_played":1710000000},{"appid":400,"name":"Portal","playtime_forever":180,"rtime_last_played":1710100000},{"appid":500,"name":"Left 4 Dead","playtime_forever":60,"rtime_last_played":1700000000}]}}`))
+			_, _ = w.Write([]byte(`{"response":{"game_count":3,"games":[{"appid":620,"name":"Portal 2","img_icon_url":"iconhash620","playtime_forever":570,"rtime_last_played":1710000000},{"appid":400,"name":"Portal","img_icon_url":"iconhash400","playtime_forever":180,"rtime_last_played":1710100000},{"appid":500,"name":"Left 4 Dead","img_icon_url":"iconhash500","playtime_forever":60,"rtime_last_played":1700000000}]}}`))
 		case "/achievements":
 			if got := r.URL.Query().Get("appid"); got != "400" {
 				t.Fatalf("unexpected achievements appid query: %q", got)
@@ -189,6 +195,9 @@ func TestUpdateUsesLastLogoffWhenOffline(t *testing.T) {
 	}
 	if entry.GameURL != "https://store.steampowered.com/app/400/" {
 		t.Fatalf("unexpected game url: %q", entry.GameURL)
+	}
+	if entry.GameIconURL != "https://media.steampowered.com/steamcommunity/public/images/apps/400/iconhash400.jpg" {
+		t.Fatalf("unexpected game icon url: %q", entry.GameIconURL)
 	}
 	if entry.HoursPlayed != 3 {
 		t.Fatalf("expected updated hours played, got %d", entry.HoursPlayed)

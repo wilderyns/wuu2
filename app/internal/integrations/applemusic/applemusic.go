@@ -47,6 +47,9 @@ type recentPlayedTrackAttributes struct {
 	AlbumName  string `json:"albumName"`
 	ArtistName string `json:"artistName"`
 	URL        string `json:"url"`
+	Artwork    struct {
+		URL string `json:"url"`
+	} `json:"artwork"`
 }
 
 type recentPlayedTrack struct {
@@ -59,8 +62,11 @@ type includedResource struct {
 	ID         string `json:"id"`
 	Type       string `json:"type"`
 	Attributes struct {
-		Name string `json:"name"`
-		URL  string `json:"url"`
+		Name    string `json:"name"`
+		URL     string `json:"url"`
+		Artwork struct {
+			URL string `json:"url"`
+		} `json:"artwork"`
 	} `json:"attributes"`
 }
 
@@ -349,12 +355,13 @@ func (c *Client) Update(snapshot *model.Wuu2) {
 	}
 
 	entry := model.AppleMusic{
-		Song:       strings.TrimSpace(track.Attributes.Name),
-		SongLink:   strings.TrimSpace(track.Attributes.URL),
-		Artist:     strings.TrimSpace(track.Attributes.ArtistName),
-		ArtistLink: artistURL(artist),
-		Album:      strings.TrimSpace(track.Attributes.AlbumName),
-		AlbumLink:  albumURL(album),
+		Song:        strings.TrimSpace(track.Attributes.Name),
+		SongLink:    strings.TrimSpace(track.Attributes.URL),
+		Artist:      strings.TrimSpace(track.Attributes.ArtistName),
+		ArtistLink:  artistURL(artist),
+		Album:       strings.TrimSpace(track.Attributes.AlbumName),
+		AlbumLink:   albumURL(album),
+		AlbumArtURL: artworkURL(track, album),
 	}
 	if entry.Artist == "" {
 		entry.Artist = includedName(artist)
@@ -478,6 +485,18 @@ func albumURL(resource *includedResource) string {
 		return ""
 	}
 	return strings.TrimSpace(resource.Attributes.URL)
+}
+
+func artworkURL(track *recentPlayedTrack, album *includedResource) string {
+	if track != nil {
+		if url := strings.TrimSpace(track.Attributes.Artwork.URL); url != "" {
+			return url
+		}
+	}
+	if album != nil {
+		return strings.TrimSpace(album.Attributes.Artwork.URL)
+	}
+	return ""
 }
 
 func (c *Client) hasConfig() bool {

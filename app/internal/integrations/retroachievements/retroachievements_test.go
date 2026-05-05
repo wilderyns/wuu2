@@ -36,7 +36,7 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 			if got := r.URL.Query().Get("a"); got != "0" {
 				t.Fatalf("unexpected recent achievements query: %q", got)
 			}
-			_, _ = w.Write([]byte(`{"Rank":512,"Status":"Online","RichPresenceMsg":"Playing Super Metroid","RecentlyPlayed":[{"GameID":42,"Title":"Super Metroid","LastPlayed":"2026-05-04 21:54:54"}],"LastGame":{"ID":42,"Title":"Super Metroid"}}`))
+			_, _ = w.Write([]byte(`{"Rank":512,"Status":"Online","RichPresenceMsg":"Playing Super Metroid","RecentlyPlayed":[{"GameID":42,"Title":"Super Metroid","LastPlayed":"2026-05-04 21:54:54","ImageIcon":"/Images/000042.png"}],"LastGame":{"ID":42,"Title":"Super Metroid","ImageIcon":"/Images/lastgame.png"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -72,6 +72,9 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 	}
 	if entry.LastGameTitle != "Super Metroid" {
 		t.Fatalf("unexpected last game title: %q", entry.LastGameTitle)
+	}
+	if entry.GameIconURL != "https://retroachievements.org/Images/000042.png" {
+		t.Fatalf("unexpected game icon url: %q", entry.GameIconURL)
 	}
 	if entry.LastChange != "2026-05-04T21:54:54Z" {
 		t.Fatalf("unexpected last change: %q", entry.LastChange)

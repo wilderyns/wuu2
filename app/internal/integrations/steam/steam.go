@@ -47,6 +47,7 @@ type ownedGamesResponse struct {
 type ownedGame struct {
 	AppID           int    `json:"appid"`
 	Name            string `json:"name"`
+	IconHash        string `json:"img_icon_url"`
 	PlaytimeForever int    `json:"playtime_forever"`
 	LastPlayedUnix  int64  `json:"rtime_last_played"`
 }
@@ -101,6 +102,7 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 			gameID = strconv.Itoa(recentGame.AppID)
 			entry.GameName = strings.TrimSpace(recentGame.Name)
 			entry.GameURL = buildGameURL(gameID)
+			entry.GameIconURL = buildGameIconURL(recentGame.AppID, recentGame.IconHash)
 			entry.HoursPlayed = recentGame.PlaytimeForever / 60
 			haveHoursPlayed = true
 			lastPlayedAt = recentGame.LastPlayedUnix
@@ -108,11 +110,12 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 	}
 
 	if gameID != "" && !haveHoursPlayed {
-		hoursPlayed, err := fetchHoursPlayed(cfg, gameID)
+		hoursPlayed, gameIconURL, err := fetchHoursPlayedAndIcon(cfg, gameID)
 		if err != nil {
 			fmt.Println("Steam owned games request failed:", err)
 		} else {
 			entry.HoursPlayed = hoursPlayed
+			entry.GameIconURL = gameIconURL
 		}
 	}
 	if gameID != "" {
@@ -176,7 +179,7 @@ func fetchPlayerSummary(cfg config.Config) (*playerSummary, error) {
 	return &player, nil
 }
 
-func fetchHoursPlayed(cfg config.Config, gameID string) (int, error) {
+func fetchHoursPlayedAndIcon(cfg config.Config, gameID string) (int, string, error) {
 	query := url.Values{}
 	query.Set("key", strings.TrimSpace(cfg.SteamWebAPIKey))
 	query.Set("steamid", strings.TrimSpace(cfg.SteamID))
@@ -193,12 +196,12 @@ func fetchHoursPlayed(cfg config.Config, gameID string) (int, error) {
 
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer func(body io.ReadCloser) {
 		_ = body.Close()
@@ -206,23 +209,23 @@ func fetchHoursPlayed(cfg config.Config, gameID string) (int, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return 0, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		return 0, "", fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var parsed ownedGamesResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	for _, game := range parsed.Response.Games {
 		if strconv.Itoa(game.AppID) == strings.TrimSpace(gameID) {
-			return game.PlaytimeForever / 60, nil
+			return game.PlaytimeForever / 60, buildGameIconURL(game.AppID, game.IconHash), nil
 		}
 	}
 
-	return 0, nil
+	return 0, "", nil
 }
 
 func fetchMostRecentlyPlayedOwnedGame(cfg config.Config) (*ownedGame, error) {
@@ -342,6 +345,15 @@ func buildGameURL(gameID string) string {
 	}
 
 	return "https://store.steampowered.com/app/" + url.PathEscape(gameID) + "/"
+}
+
+func buildGameIconURL(appID int, iconHash string) string {
+	iconHash = strings.TrimSpace(iconHash)
+	if appID <= 0 || iconHash == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("https://media.steampowered.com/steamcommunity/public/images/apps/%d/%s.jpg", appID, url.PathEscape(iconHash))
 }
 
 func resolveLastChange(existing *model.Steam, current model.Steam, summary playerSummary, fallbackLastPlayedAt int64, now time.Time) string {

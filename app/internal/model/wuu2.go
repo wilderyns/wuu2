@@ -28,13 +28,14 @@ type Wow struct {
 }
 
 type AppleMusic struct {
-	LastChange string
-	Song       string
-	SongLink   string
-	Artist     string
-	ArtistLink string
-	Album      string
-	AlbumLink  string
+	LastChange  string
+	Song        string
+	SongLink    string
+	Artist      string
+	ArtistLink  string
+	Album       string
+	AlbumLink   string
+	AlbumArtURL string
 }
 
 type Spotify struct {
@@ -52,6 +53,7 @@ type Steam struct {
 	LastChange         string
 	GameName           string
 	GameURL            string
+	GameIconURL        string
 	ProfileAvatarURL   string
 	HoursPlayed        int
 	EarnedAchievements int
@@ -65,6 +67,7 @@ type RetroAchievements struct {
 	RetroPoints      int
 	LastGameID       int
 	LastGameTitle    string
+	GameIconURL      string
 	CurrentlyInGame  bool
 	RichPresence     string
 	ProfileAvatarURL string

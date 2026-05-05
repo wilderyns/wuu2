@@ -48,11 +48,14 @@ func TestUpdateSetsMostRecentlyPlayedSongDetails(t *testing.T) {
 					"name": "Everything In Its Right Place",
 					"artistName": "Radiohead",
 					"albumName": "Kid A",
-					"url": "https://music.apple.com/us/album/everything-in-its-right-place/123"
+					"url": "https://music.apple.com/us/album/everything-in-its-right-place/123",
+					"artwork": {
+						"url": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/example/{w}x{h}bb.jpg"
+					}
 				}
 			}],
 			"included": [
-				{"id":"album-1","type":"albums","attributes":{"name":"Kid A","url":"https://music.apple.com/us/album/kid-a/album-1"}},
+				{"id":"album-1","type":"albums","attributes":{"name":"Kid A","url":"https://music.apple.com/us/album/kid-a/album-1","artwork":{"url":"https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/album/{w}x{h}bb.jpg"}}},
 				{"id":"artist-1","type":"artists","attributes":{"name":"Radiohead","url":"https://music.apple.com/us/artist/radiohead/artist-1"}}
 			]
 		}`))
@@ -93,6 +96,9 @@ func TestUpdateSetsMostRecentlyPlayedSongDetails(t *testing.T) {
 	}
 	if entry.AlbumLink != "https://music.apple.com/us/album/kid-a/album-1" {
 		t.Fatalf("unexpected album link: %q", entry.AlbumLink)
+	}
+	if entry.AlbumArtURL != "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/example/{w}x{h}bb.jpg" {
+		t.Fatalf("unexpected album art url: %q", entry.AlbumArtURL)
 	}
 	if entry.LastChange == "" {
 		t.Fatal("expected last change to be set")
