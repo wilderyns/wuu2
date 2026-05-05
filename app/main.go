@@ -26,7 +26,6 @@ var serverStartTime = time.Now().UTC()
 var totalRequests uint64
 var snapshotUpdateMu sync.Mutex
 
-var retroAchievementsUpdateOffset = time.Minute
 var (
 	traktUpdateFn      = trakt.Update
 	steamUpdateFn      = steam.Update
@@ -38,35 +37,27 @@ var (
 	retroAchievementsUpdateFn = retroachievements.Update
 )
 
-func retroAchievementsUpdateInterval(base time.Duration) time.Duration {
-	return base + retroAchievementsUpdateOffset
-}
-
-func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client, includeCore bool, includeRetroAchievements bool) {
+func getUpdates(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client) {
 	snapshotUpdateMu.Lock()
 	defer snapshotUpdateMu.Unlock()
 
 	snapshot := store.Get()
 
-	if includeCore {
-		if cfg.TraktEnabled {
-			traktUpdateFn(cfg, &snapshot)
-		}
-
-		if cfg.BattleNetEnabled {
-			battleClient.Update(&snapshot)
-		}
-
-		steamUpdateFn(cfg, &snapshot)
-		appleMusicUpdateFn(appleMusicClient, &snapshot)
+	if cfg.TraktEnabled {
+		traktUpdateFn(cfg, &snapshot)
 	}
 
-	if includeRetroAchievements {
-		if !cfg.RetroAchievementsEnabled {
-			snapshot.RetroAchievements = nil
-		} else {
-			retroAchievementsUpdateFn(cfg, &snapshot)
-		}
+	if cfg.BattleNetEnabled {
+		battleClient.Update(&snapshot)
+	}
+
+	steamUpdateFn(cfg, &snapshot)
+	appleMusicUpdateFn(appleMusicClient, &snapshot)
+
+	if !cfg.RetroAchievementsEnabled {
+		snapshot.RetroAchievements = nil
+	} else {
+		retroAchievementsUpdateFn(cfg, &snapshot)
 	}
 
 	store.Set(snapshot)
@@ -80,27 +71,17 @@ func timedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleCli
 }
 
 func runTimedUpdater(cfg config.Config, store *persistence.SnapshotStore, battleClient *battle.Client, appleMusicClient *applemusic.Client, stop <-chan struct{}) {
-	getUpdates(cfg, store, battleClient, appleMusicClient, true, true)
+	getUpdates(cfg, store, battleClient, appleMusicClient)
 
 	coreTicker := time.NewTicker(cfg.UpdateIntervalMinutes)
 	defer coreTicker.Stop()
-
-	var retroTicker *time.Ticker
-	var retroTickerCh <-chan time.Time
-	if cfg.RetroAchievementsEnabled {
-		retroTicker = time.NewTicker(retroAchievementsUpdateInterval(cfg.UpdateIntervalMinutes))
-		defer retroTicker.Stop()
-		retroTickerCh = retroTicker.C
-	}
 
 	for {
 		select {
 		case <-stop:
 			return
 		case <-coreTicker.C:
-			getUpdates(cfg, store, battleClient, appleMusicClient, true, false)
-		case <-retroTickerCh:
-			getUpdates(cfg, store, battleClient, appleMusicClient, false, true)
+			getUpdates(cfg, store, battleClient, appleMusicClient)
 		}
 	}
 }

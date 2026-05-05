@@ -13,6 +13,13 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("unexpected accept header: %q", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != userAgent {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
+
 		switch r.URL.Path {
 		case "/profile":
 			if got := r.URL.Query().Get("u"); got != "wilderyns" {
@@ -29,7 +36,7 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 			if got := r.URL.Query().Get("a"); got != "0" {
 				t.Fatalf("unexpected recent achievements query: %q", got)
 			}
-			_, _ = w.Write([]byte(`{"Rank":512,"Status":"Online","RichPresenceMsg":"Playing Super Metroid","LastGame":{"ID":42,"Title":"Super Metroid"}}`))
+			_, _ = w.Write([]byte(`{"Rank":512,"Status":"Online","RichPresenceMsg":"Playing Super Metroid","RecentlyPlayed":[{"GameID":42,"Title":"Super Metroid","LastPlayed":"2026-05-04 21:54:54"}],"LastGame":{"ID":42,"Title":"Super Metroid"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -66,6 +73,9 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 	if entry.LastGameTitle != "Super Metroid" {
 		t.Fatalf("unexpected last game title: %q", entry.LastGameTitle)
 	}
+	if entry.LastChange != "2026-05-04T21:54:54Z" {
+		t.Fatalf("unexpected last change: %q", entry.LastChange)
+	}
 	if !entry.CurrentlyInGame {
 		t.Fatal("expected user to be marked in game")
 	}
@@ -84,6 +94,13 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("unexpected accept header: %q", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != userAgent {
+			t.Fatalf("unexpected user agent: %q", got)
+		}
+
 		switch r.URL.Path {
 		case "/profile":
 			_, _ = w.Write([]byte(`{"User":"wilderyns","ULID":"01","UserPic":"/UserPic/wilderyns.png","RichPresenceMsg":"","LastGameID":84,"TotalPoints":1500,"TotalSoftcorePoints":1700,"TotalTruePoints":4200}`))
@@ -100,6 +117,7 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 
 	snapshot := model.Wuu2{
 		RetroAchievements: []model.RetroAchievements{{
+			LastChange:       "2026-05-01T12:00:00Z",
 			LastGameID:       84,
 			LastGameTitle:    "Chrono Trigger",
 			SiteRank:         321,
@@ -120,6 +138,9 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 	}
 	if entry.SiteRank != 321 {
 		t.Fatalf("expected preserved site rank, got %d", entry.SiteRank)
+	}
+	if entry.LastChange != "2026-05-01T12:00:00Z" {
+		t.Fatalf("expected preserved last change, got %q", entry.LastChange)
 	}
 	if entry.CurrentlyInGame {
 		t.Fatal("expected empty presence to mark user out of game")

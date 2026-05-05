@@ -48,14 +48,18 @@ type Spotify struct {
 }
 
 type Steam struct {
-	LastChange       string
-	GameName         string
-	GameURL          string
-	ProfileAvatarURL string
-	HoursPlayed      int
+	CurrentlyInGame    bool
+	LastChange         string
+	GameName           string
+	GameURL            string
+	ProfileAvatarURL   string
+	HoursPlayed        int
+	EarnedAchievements int
+	TotalAchievements  int
 }
 
 type RetroAchievements struct {
+	LastChange       string
 	HardcorePoints   int
 	SoftcorePoints   int
 	RetroPoints      int

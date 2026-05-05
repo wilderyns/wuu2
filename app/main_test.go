@@ -11,19 +11,7 @@ import (
 	"wuu2/internal/model"
 )
 
-func TestRetroAchievementsUpdateIntervalAddsOneMinute(t *testing.T) {
-	if got := retroAchievementsUpdateInterval(2 * time.Minute); got != 3*time.Minute {
-		t.Fatalf("expected interval of 3m, got %s", got)
-	}
-}
-
-func TestRunTimedUpdaterSchedulesRetroAchievementsIndependently(t *testing.T) {
-	previousOffset := retroAchievementsUpdateOffset
-	retroAchievementsUpdateOffset = 50 * time.Millisecond
-	defer func() {
-		retroAchievementsUpdateOffset = previousOffset
-	}()
-
+func TestRunTimedUpdaterRefreshesRetroAchievementsOnCoreTicker(t *testing.T) {
 	previousSteamUpdate := steamUpdateFn
 	previousAppleMusicUpdate := appleMusicUpdateFn
 	previousRetroAchievementsUpdate := retroAchievementsUpdateFn
@@ -74,8 +62,8 @@ func TestRunTimedUpdaterSchedulesRetroAchievementsIndependently(t *testing.T) {
 
 	select {
 	case elapsed := <-secondRunAt:
-		if elapsed >= 175*time.Millisecond {
-			t.Fatalf("expected second RetroAchievements update before the second core tick, got %s", elapsed)
+		if elapsed < 75*time.Millisecond || elapsed > 200*time.Millisecond {
+			t.Fatalf("expected second RetroAchievements update on the first core tick, got %s", elapsed)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for second RetroAchievements update")

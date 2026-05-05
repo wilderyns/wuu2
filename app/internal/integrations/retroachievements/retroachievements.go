@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"wuu2/internal/config"
 	"wuu2/internal/model"
 )
 
 const siteURL = "https://retroachievements.org"
+const userAgent = "wuu2/1.0 (+https://github.com/wilderyns/wuu2)"
 
 var (
 	httpClient     = http.DefaultClient
@@ -35,7 +37,12 @@ type userSummaryResponse struct {
 	Rank            int    `json:"Rank"`
 	Status          string `json:"Status"`
 	RichPresenceMsg string `json:"RichPresenceMsg"`
-	LastGame        struct {
+	RecentlyPlayed  []struct {
+		GameID     int    `json:"GameID"`
+		Title      string `json:"Title"`
+		LastPlayed string `json:"LastPlayed"`
+	} `json:"RecentlyPlayed"`
+	LastGame struct {
 		ID    int    `json:"ID"`
 		Title string `json:"Title"`
 	} `json:"LastGame"`
@@ -78,6 +85,9 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		if existing.LastGameID == entry.LastGameID {
 			entry.LastGameTitle = existing.LastGameTitle
 		}
+		if existing.LastChange != "" {
+			entry.LastChange = existing.LastChange
+		}
 	}
 
 	summary, err := fetchUserSummary(cfg)
@@ -92,6 +102,17 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		}
 		if title := strings.TrimSpace(summary.LastGame.Title); title != "" {
 			entry.LastGameTitle = title
+		}
+		if len(summary.RecentlyPlayed) > 0 {
+			if title := strings.TrimSpace(summary.RecentlyPlayed[0].Title); title != "" {
+				entry.LastGameTitle = title
+			}
+			if summary.RecentlyPlayed[0].GameID > 0 {
+				entry.LastGameID = summary.RecentlyPlayed[0].GameID
+			}
+			if lastChange := normalizeRetroAchievementsTime(summary.RecentlyPlayed[0].LastPlayed); lastChange != "" {
+				entry.LastChange = lastChange
+			}
 		}
 		if richPresence := strings.TrimSpace(summary.RichPresenceMsg); richPresence != "" {
 			entry.RichPresence = richPresence
@@ -135,6 +156,8 @@ func doRequest(requestURL string, target any) error {
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -198,4 +221,18 @@ func firstRetroAchievementsEntry(entries []model.RetroAchievements) *model.Retro
 
 	entry := entries[0]
 	return &entry
+}
+
+func normalizeRetroAchievementsTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	parsed, err := time.Parse("2006-01-02 15:04:05", value)
+	if err != nil {
+		return value
+	}
+
+	return parsed.UTC().Format(time.RFC3339)
 }

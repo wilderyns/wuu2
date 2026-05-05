@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type viewData struct {
@@ -30,11 +32,64 @@ var gateTemplate = template.Must(template.New("auth_gate").Parse(`<!doctype html
   <h1>Enter Security Code</h1>
   <p class="note">{{.Message}}</p>
   <form method="post" action="{{.Action}}">
-    <input type="password" name="code" autocomplete="one-time-code" placeholder="Security code" required>
+    <input type="password" name="code" autocomplete="wuu2-security-code" placeholder="Security code" required>
     <button type="submit">Continue</button>
   </form>
 </body>
 </html>`))
+
+type ipRateLimiter struct {
+	mu      sync.Mutex
+	window  time.Duration
+	limit   int
+	buckets map[string][]time.Time
+}
+
+func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
+	if limit <= 0 {
+		limit = 5
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+
+	return &ipRateLimiter{
+		window:  window,
+		limit:   limit,
+		buckets: map[string][]time.Time{},
+	}
+}
+
+func (l *ipRateLimiter) allow(key string, now time.Time) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "unknown"
+	}
+
+	cutoff := now.Add(-l.window)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	entries := l.buckets[key]
+	filtered := entries[:0]
+	for _, ts := range entries {
+		if ts.After(cutoff) {
+			filtered = append(filtered, ts)
+		}
+	}
+
+	if len(filtered) >= l.limit {
+		l.buckets[key] = filtered
+		return false
+	}
+
+	filtered = append(filtered, now)
+	l.buckets[key] = filtered
+	return true
+}
+
+var authAttemptLimiter = newIPRateLimiter(10, 5*time.Minute)
 
 func WithSecurityGate(code string, flowName string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +105,11 @@ func WithSecurityGate(code string, flowName string, next http.HandlerFunc) http.
 			return
 		}
 
+		if provided != "" && !authAttemptLimiter.allow(clientIP(r), time.Now()) {
+			http.Error(w, "too many attempts", http.StatusTooManyRequests)
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = gateTemplate.Execute(w, viewData{
@@ -61,15 +121,37 @@ func WithSecurityGate(code string, flowName string, next http.HandlerFunc) http.
 }
 
 func extractCode(r *http.Request) string {
-	provided := strings.TrimSpace(r.URL.Query().Get("code"))
-	if provided != "" {
-		return provided
+	if r == nil {
+		return ""
 	}
-
+	if r.Method != http.MethodPost {
+		return ""
+	}
 	if err := r.ParseForm(); err != nil {
 		return ""
 	}
 	return strings.TrimSpace(r.FormValue("code"))
+}
+
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+
+	forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	if realIP != "" {
+		return realIP
+	}
+
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func codeMatches(expected string, provided string) bool {
