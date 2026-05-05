@@ -105,7 +105,7 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 			entry.TotalAchievements = existing.TotalAchievements
 			entry.Beaten = existing.Beaten
 			entry.Mastered = existing.Mastered
-			entry.PlaytimeMinutes = existing.PlaytimeMinutes
+			entry.PlaytimeSeconds = existing.PlaytimeSeconds
 		}
 	}
 
@@ -152,7 +152,7 @@ func Update(cfg config.Config, snapshot *model.Wuu2) {
 		} else if progress != nil {
 			entry.EarnedAchievements = progress.NumAwardedToUser
 			entry.TotalAchievements = progress.NumAchievements
-			entry.PlaytimeMinutes = progress.UserTotalPlaytime
+			entry.PlaytimeSeconds = progress.UserTotalPlaytime
 			entry.Mastered = isMastered(progress.HighestAwardKind)
 			entry.Beaten = isBeaten(progress.HighestAwardKind)
 			if title := strings.TrimSpace(progress.Title); title != "" {
@@ -197,6 +197,7 @@ func fetchUserGameProgress(cfg config.Config, gameID int) (*userGameProgressResp
 	params.Set("y", strings.TrimSpace(cfg.RetroAchievementsKey))
 	params.Set("u", strings.TrimSpace(cfg.RetroAchievementsUser))
 	params.Set("g", fmt.Sprintf("%d", gameID))
+	params.Set("a", "1")
 
 	var progress userGameProgressResponse
 	if err := doRequest(buildRequestURL(userGameProgressURL, params), &progress); err != nil {

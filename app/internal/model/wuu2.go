@@ -76,7 +76,7 @@ type RetroAchievements struct {
 	TotalAchievements  int
 	Beaten             bool
 	Mastered           bool
-	PlaytimeMinutes    int
+	PlaytimeSeconds    int
 }
 
 type Information struct {

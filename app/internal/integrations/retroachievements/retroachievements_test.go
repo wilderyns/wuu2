@@ -41,6 +41,9 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 			if got := r.URL.Query().Get("g"); got != "42" {
 				t.Fatalf("unexpected game id query: %q", got)
 			}
+			if got := r.URL.Query().Get("a"); got != "1" {
+				t.Fatalf("unexpected award metadata query: %q", got)
+			}
 			_, _ = w.Write([]byte(`{"ID":42,"Title":"Super Metroid","NumAchievements":33,"NumAwardedToUser":21,"UserTotalPlaytime":645,"HighestAwardKind":"beaten-hardcore"}`))
 		default:
 			http.NotFound(w, r)
@@ -105,8 +108,8 @@ func TestUpdateSetsRetroAchievementsProfileAndSummaryFields(t *testing.T) {
 	if entry.Mastered {
 		t.Fatal("expected mastered to be false")
 	}
-	if entry.PlaytimeMinutes != 645 {
-		t.Fatalf("unexpected playtime minutes: %d", entry.PlaytimeMinutes)
+	if entry.PlaytimeSeconds != 645 {
+		t.Fatalf("unexpected playtime seconds: %d", entry.PlaytimeSeconds)
 	}
 }
 
@@ -149,7 +152,7 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 			TotalAchievements:  24,
 			Beaten:             true,
 			Mastered:           false,
-			PlaytimeMinutes:    320,
+			PlaytimeSeconds:    320,
 		}},
 	}
 
@@ -181,8 +184,8 @@ func TestUpdatePreservesRankAndTitleWhenSummaryFails(t *testing.T) {
 	if entry.Mastered {
 		t.Fatal("expected mastered to remain false")
 	}
-	if entry.PlaytimeMinutes != 320 {
-		t.Fatalf("expected preserved playtime minutes, got %d", entry.PlaytimeMinutes)
+	if entry.PlaytimeSeconds != 320 {
+		t.Fatalf("expected preserved playtime seconds, got %d", entry.PlaytimeSeconds)
 	}
 }
 
